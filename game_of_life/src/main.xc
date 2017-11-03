@@ -69,6 +69,15 @@ void DataInStream(char infname[], chanend c_out)
   return;
 }
 
+//mod by n
+int modn(int n, int x){
+  while (x < 0 || x > (n - 1)){
+      if (x < 0) x += n;
+      else x -= n;
+  }
+  return x;
+}
+
 /////////////////////////////////////////////////////////////////////////////////////////
 //
 // Start your implementation by changing this function to implement the game of life
@@ -78,7 +87,8 @@ void DataInStream(char infname[], chanend c_out)
 /////////////////////////////////////////////////////////////////////////////////////////
 void distributor(chanend c_in, chanend c_out, chanend fromAcc)
 {
-  uchar val;
+  uchar val[IMWD][IMHT]; //To store snapshot of current image
+  uchar newVal[IMWD][IMHT]; //To store new snapshot of image
 
   //Starting up and wait for tilting of the xCore-200 Explorer
   printf( "ProcessImage: Start, size = %dx%d\n", IMHT, IMWD );
@@ -91,10 +101,53 @@ void distributor(chanend c_in, chanend c_out, chanend fromAcc)
   printf( "Processing...\n" );
   for( int y = 0; y < IMHT; y++ ) {   //go through all lines
     for( int x = 0; x < IMWD; x++ ) { //go through each pixel per line
-      c_in :> val;                    //read the pixel value
-      c_out <: (uchar)( val ^ 0xFF ); //send some modified pixel out
+      c_in :> val[x][y];                   //read the pixel value
     }
   }
+
+  for( int y = 0; y < IMHT; y++ ) {   //go through all lines
+     for( int x = 0; x < IMWD; x++ ) { //go through each pixel per line
+        //store neighbours in 1D array
+        int xRight = mod(IMWD, x+1);
+        int xLeft = mod(IMWD, x-1);
+        int yUp = mod(IMHT, y-1);
+        int yDown = mod(IMHT, y+1);
+
+        uchar neighbours[8] = {(val[xLeft][yUp]), (val[x][yUp]), (val[xRight][yUp]),
+                               (val[xLeft][y]), (val[xRight][y]),
+                               (val[xLeft][yDown]), (val[x][yDown]), (val[xRight][yDown])};
+        int alive = 0;
+        for (int i = 0; i < 8; i++) {
+            if (neighbours[i] == 0xFF) {
+                alive++;
+            }
+        }
+        // If currently alive
+        if (val[x][y] == 0xFF) {
+            // If number of alive neighbours isn't two or three, die. Else stay alive by default
+            if (alive != 2 && alive != 3) {
+                newVal[x][y] = 0x0;
+            }
+            else
+            {
+                newVal[x][y] = 0xFF;
+            }
+        }
+        // Else cell is currently dead: if three alive neighbours resurrect
+        else {
+            if (alive == 3) {
+                newVal[x][y] = 0xFF;
+            }
+            else newVal[x][y] = 0x0;
+        }
+     }
+   }
+
+  for( int y = 0; y < IMHT; y++ ) {   //go through all lines
+      for( int x = 0; x < IMWD; x++ ) { //go through each pixel per line
+        c_out <: newVal[x][y]; //send some modified pixel out
+      }
+    }
   printf( "\nOne processing round completed...\n" );
 }
 
@@ -120,9 +173,11 @@ void DataOutStream(char outfname[], chanend c_in)
   for( int y = 0; y < IMHT; y++ ) {
     for( int x = 0; x < IMWD; x++ ) {
       c_in :> line[ x ];
+      printf( "-%4.1d ", line[ x ] ); //show image values
     }
+    printf( "\n" );
     _writeoutline( line, IMWD );
-    printf( "DataOutStream: Line written...\n" );
+    //printf( "DataOutStream: Line written...\n" );
   }
 
   //Close the PGM image
@@ -169,6 +224,7 @@ void orientation( client interface i2c_master_if i2c, chanend toDist) {
       if (x>30) {
         tilted = 1 - tilted;
         toDist <: 1;
+        break;
       }
     }
   }
@@ -193,7 +249,7 @@ par {
     DataInStream(infname, c_inIO);          //thread to read in a PGM image
     DataOutStream(outfname, c_outIO);       //thread to write out a PGM image
     distributor(c_inIO, c_outIO, c_control);//thread to coordinate work on image
-  }
+}
 
-  return 0;
+return 0;
 }

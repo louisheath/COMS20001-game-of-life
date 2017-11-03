@@ -99,56 +99,66 @@ void distributor(chanend c_in, chanend c_out, chanend fromAcc)
   //This just inverts every pixel, but you should
   //change the image according to the "Game of Life"
   printf( "Processing...\n" );
+
   for( int y = 0; y < IMHT; y++ ) {   //go through all lines
     for( int x = 0; x < IMWD; x++ ) { //go through each pixel per line
       c_in :> val[x][y];                   //read the pixel value
     }
   }
 
-  for( int y = 0; y < IMHT; y++ ) {   //go through all lines
-     for( int x = 0; x < IMWD; x++ ) { //go through each pixel per line
-        //store neighbours in 1D array
-        int xRight = mod(IMWD, x+1);
-        int xLeft = mod(IMWD, x-1);
-        int yUp = mod(IMHT, y-1);
-        int yDown = mod(IMHT, y+1);
+  while(1) {
+      printf ("\nmans not hot");
+      for( int y = 0; y < IMHT; y++ ) {   //go through all lines
+         for( int x = 0; x < IMWD; x++ ) { //go through each pixel per line
+            //store neighbours in 1D array
+            int xRight = mod(IMWD, x+1);
+            int xLeft = mod(IMWD, x-1);
+            int yUp = mod(IMHT, y-1);
+            int yDown = mod(IMHT, y+1);
 
-        uchar neighbours[8] = {(val[xLeft][yUp]), (val[x][yUp]), (val[xRight][yUp]),
-                               (val[xLeft][y]), (val[xRight][y]),
-                               (val[xLeft][yDown]), (val[x][yDown]), (val[xRight][yDown])};
-        int alive = 0;
-        for (int i = 0; i < 8; i++) {
-            if (neighbours[i] == 0xFF) {
-                alive++;
+            uchar neighbours[8] = {(val[xLeft][yUp]), (val[x][yUp]), (val[xRight][yUp]),
+                                   (val[xLeft][y]), (val[xRight][y]),
+                                   (val[xLeft][yDown]), (val[x][yDown]), (val[xRight][yDown])};
+            int alive = 0;
+            for (int i = 0; i < 8; i++) {
+                if (neighbours[i] == 0xFF) {
+                    alive++;
+                }
             }
-        }
-        // If currently alive
-        if (val[x][y] == 0xFF) {
-            // If number of alive neighbours isn't two or three, die. Else stay alive by default
-            if (alive != 2 && alive != 3) {
-                newVal[x][y] = 0x0;
+            // If currently alive
+            if (val[x][y] == 0xFF) {
+                // If number of alive neighbours isn't two or three, die. Else stay alive by default
+                if (alive != 2 && alive != 3) {
+                    newVal[x][y] = 0x0;
+                }
+                else
+                {
+                    newVal[x][y] = 0xFF;
+                }
             }
-            else
-            {
-                newVal[x][y] = 0xFF;
+            // Else cell is currently dead: if three alive neighbours resurrect
+            else {
+                if (alive == 3) {
+                    newVal[x][y] = 0xFF;
+                }
+                else newVal[x][y] = 0x0;
             }
-        }
-        // Else cell is currently dead: if three alive neighbours resurrect
-        else {
-            if (alive == 3) {
-                newVal[x][y] = 0xFF;
-            }
-            else newVal[x][y] = 0x0;
-        }
-     }
-   }
+         }
+       }
 
-  for( int y = 0; y < IMHT; y++ ) {   //go through all lines
-      for( int x = 0; x < IMWD; x++ ) { //go through each pixel per line
-        c_out <: newVal[x][y]; //send some modified pixel out
+      for( int y = 0; y < IMHT; y++ ) {   //go through all lines
+          for( int x = 0; x < IMWD; x++ ) { //go through each pixel per line
+            c_out <: newVal[x][y]; //send some modified pixel out
+          }
       }
-    }
-  printf( "\nOne processing round completed...\n" );
+
+      for( int y = 0; y < IMHT; y++ ) {   //go through all lines
+          for( int x = 0; x < IMWD; x++ ) { //go through each pixel per line
+            newVal[x][y] = val[x][y];                   //transfer new pixels to old array
+          }
+      }
+      printf( "\nOne processing round completed...\n" );
+  }
 }
 
 /////////////////////////////////////////////////////////////////////////////////////////
@@ -224,7 +234,6 @@ void orientation( client interface i2c_master_if i2c, chanend toDist) {
       if (x>30) {
         tilted = 1 - tilted;
         toDist <: 1;
-        break;
       }
     }
   }

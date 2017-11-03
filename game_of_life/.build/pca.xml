@@ -353,18 +353,6 @@
     </values>
   </arg>
 </fInfo>
-<fInfo name="DataOutStream" global="true" specialize="false" noreturn="false" doNotSpecialize="false" numParams="2">
-  <arg num="0" specialize="false">
-    <values>
-      <value type="unknown"/>
-    </values>
-  </arg>
-  <arg num="1" specialize="false">
-    <values>
-      <value type="unknown"/>
-    </values>
-  </arg>
-</fInfo>
 <fInfo name="_safe_memcmp" global="true" specialize="false" noreturn="false" doNotSpecialize="true" numParams="3">
   <arg num="0" specialize="false">
     <values>
@@ -429,7 +417,7 @@
     </values>
   </arg>
 </fInfo>
-<fInfo name="distributor" global="true" specialize="false" noreturn="false" doNotSpecialize="false" numParams="3">
+<fInfo name="distributor" global="true" specialize="false" noreturn="true" doNotSpecialize="false" numParams="3">
   <arg num="0" specialize="false">
     <values>
       <value type="unknown"/>
@@ -668,7 +656,7 @@
 </fInfo>
 <fInfo name="operation_complete" global="true" interface="i2c_master_async_if" specialize="false" noreturn="false" doNotSpecialize="false" numParams="0">
 </fInfo>
-<fInfo name="orientation" global="true" specialize="true" noreturn="false" doNotSpecialize="false" numParams="2">
+<fInfo name="orientation" global="true" specialize="true" noreturn="true" doNotSpecialize="false" numParams="2">
   <arg num="0" specialize="true">
     <values>
       <value type="interface"><interfaceInfo index="0" type="dist" func="_Si2c_master_0" global="true" impUnit="../src/main.xc" impId="0" param="0"/></value>

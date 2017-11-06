@@ -237,6 +237,10 @@
 									<listOptionValue builtIn="false" value="&quot;${XMOS_TOOL_PATH}\target/include/clang&quot;"/>
 									<listOptionValue builtIn="false" value="&quot;${XMOS_TOOL_PATH}/target/include/xc&quot;"/>
 									<listOptionValue builtIn="false" value="&quot;${XMOS_TOOL_PATH}/target/include/clang&quot;"/>
+									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/Game-of-Life}&quot;"/>
+									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/Game-of-Life/doc}&quot;"/>
+									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/Game-of-Life/doc/pdf}&quot;"/>
+									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/Game-of-Life/src}&quot;"/>
 								</option>
 								<inputType id="com.xmos.cdt.xc.compiler.input.70843540" name="XC" superClass="com.xmos.cdt.xc.compiler.input"/>
 							</tool>
@@ -547,6 +551,10 @@
 									<listOptionValue builtIn="false" value="&quot;${XMOS_TOOL_PATH}\target/include&quot;"/>
 									<listOptionValue builtIn="false" value="&quot;${XMOS_TOOL_PATH}\target/include/clang&quot;"/>
 									<listOptionValue builtIn="false" value="&quot;${XMOS_TOOL_PATH}/target/include/clang&quot;"/>
+									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/Game-of-Life}&quot;"/>
+									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/Game-of-Life/doc}&quot;"/>
+									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/Game-of-Life/doc/pdf}&quot;"/>
+									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/Game-of-Life/src}&quot;"/>
 								</option>
 								<inputType id="com.xmos.cdt.c.compiler.input.c.63042682" name="C" superClass="com.xmos.cdt.c.compiler.input.c"/>
 							</tool>
@@ -865,6 +873,10 @@
 									<listOptionValue builtIn="false" value="&quot;${XMOS_TOOL_PATH}\target/include/c++/v1&quot;"/>
 									<listOptionValue builtIn="false" value="&quot;${XMOS_TOOL_PATH}/target/include/clang&quot;"/>
 									<listOptionValue builtIn="false" value="&quot;${XMOS_TOOL_PATH}/target/include/c++/v1&quot;"/>
+									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/Game-of-Life}&quot;"/>
+									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/Game-of-Life/doc}&quot;"/>
+									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/Game-of-Life/doc/pdf}&quot;"/>
+									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/Game-of-Life/src}&quot;"/>
 								</option>
 								<inputType id="com.xmos.cdt.cxx.compiler.input.cpp.22202437" name="C++" superClass="com.xmos.cdt.cxx.compiler.input.cpp"/>
 							</tool>
@@ -967,4 +979,5 @@
 		</profile>
 	</storageModule>
 	<storageModule moduleId="org.eclipse.cdt.core.LanguageSettingsProviders"/>
+	<storageModule moduleId="refreshScope"/>
 </cproject>

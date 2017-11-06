@@ -243,6 +243,10 @@
 									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/lib_logging/api}&quot;"/>
 									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/lib_xassert}&quot;"/>
 									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/lib_xassert/api}&quot;"/>
+									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/Game-of-Life}&quot;"/>
+									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/Game-of-Life/doc}&quot;"/>
+									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/Game-of-Life/doc/pdf}&quot;"/>
+									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/Game-of-Life/src}&quot;"/>
 								</option>
 								<inputType id="com.xmos.cdt.xc.compiler.input.5355296" name="XC" superClass="com.xmos.cdt.xc.compiler.input"/>
 							</tool>
@@ -559,6 +563,10 @@
 									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/lib_logging/api}&quot;"/>
 									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/lib_xassert}&quot;"/>
 									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/lib_xassert/api}&quot;"/>
+									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/Game-of-Life}&quot;"/>
+									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/Game-of-Life/doc}&quot;"/>
+									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/Game-of-Life/doc/pdf}&quot;"/>
+									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/Game-of-Life/src}&quot;"/>
 								</option>
 								<inputType id="com.xmos.cdt.c.compiler.input.c.73181092" name="C" superClass="com.xmos.cdt.c.compiler.input.c"/>
 							</tool>
@@ -883,6 +891,10 @@
 									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/lib_logging/api}&quot;"/>
 									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/lib_xassert}&quot;"/>
 									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/lib_xassert/api}&quot;"/>
+									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/Game-of-Life}&quot;"/>
+									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/Game-of-Life/doc}&quot;"/>
+									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/Game-of-Life/doc/pdf}&quot;"/>
+									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/Game-of-Life/src}&quot;"/>
 								</option>
 								<inputType id="com.xmos.cdt.cxx.compiler.input.cpp.16017344" name="C++" superClass="com.xmos.cdt.cxx.compiler.input.cpp"/>
 							</tool>
@@ -985,4 +997,5 @@
 		</profile>
 	</storageModule>
 	<storageModule moduleId="org.eclipse.cdt.core.LanguageSettingsProviders"/>
+	<storageModule moduleId="refreshScope"/>
 </cproject>

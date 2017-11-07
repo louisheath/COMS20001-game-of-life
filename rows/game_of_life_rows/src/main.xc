@@ -69,32 +69,34 @@ void DataInStream(char infname[], chanend c_out)
   return;
 }
 
-/////////////////////////////////////////////////////////////////////////////////////////
-//
-// Start your implementation by changing this function to implement the game of life
-// by farming out parts of the image to worker threads who implement it...
-// Currently the function just inverts the image
-//
-/////////////////////////////////////////////////////////////////////////////////////////
-void distributor(chanend c_in, chanend c_out, chanend fromAcc)
-{
-  uchar val;
+void worker(chanend f, uchar (*w)[IMWD]) {
+  f :> int id;
+}
 
-  //Starting up and wait for tilting of the xCore-200 Explorer
+// Farmer
+void distributor(chanend c_in, chanend c_out, chanend fromAcc, chanend workers[4], uchar (*w)[IMWD])
+{
+
+  // Start up. DONT wait for tilt because I don't have the board
   printf( "ProcessImage: Start, size = %dx%d\n", IMHT, IMWD );
   printf( "Waiting for Board Tilt...\n" );
-  fromAcc :> int value;
+  //fromAcc :> int value;
 
-  //Read in and do something with your image values..
-  //This just inverts every pixel, but you should
-  //change the image according to the "Game of Life"
+  // Read in and populate world array
   printf( "Processing...\n" );
   for( int y = 0; y < IMHT; y++ ) {   //go through all lines
     for( int x = 0; x < IMWD; x++ ) { //go through each pixel per line
-      c_in :> val;                    //read the pixel value
-      c_out <: (uchar)( val ^ 0xFF ); //send some modified pixel out
+      c_in :> w[x][y];                    //read the pixel value
+      c_out <: (uchar)( w[x][y] ^ 0xFF ); //send some modified pixel out
     }
   }
+
+  // let workers know the world state and their worker number
+  //   worker number will let them know which quarter to take
+  for (int i = 0; i < 4; i++) {
+      workers[i] :> i;
+  }
+
   printf( "\nOne processing round completed...\n" );
 }
 
@@ -168,7 +170,7 @@ void orientation( client interface i2c_master_if i2c, chanend toDist) {
     if (!tilted) {
       if (x>30) {
         tilted = 1 - tilted;
-        toDist <: 1;
+        //toDist <: 1;
       }
     }
   }
@@ -185,14 +187,21 @@ i2c_master_if i2c[1];               //interface to orientation
 
 char infname[] = "test.pgm";     //put your input image path here
 char outfname[] = "testout.pgm"; //put your output image path here
-chan c_inIO, c_outIO, c_control;    //extend your channel definitions here
+chan c_inIO, c_outIO, c_control, workers[4];    //extend your channel definitions here
+// 2D array representing world
+uchar (*p)[IMWD] = malloc(IMWD * IMHT);
+//sizeof (*p) == sizeof(uchar) * IMHT * IMWD;
 
 par {
     i2c_master(i2c, 1, p_scl, p_sda, 10);   //server thread providing orientation data
     orientation(i2c[0],c_control);        //client thread reading orientation data
     DataInStream(infname, c_inIO);          //thread to read in a PGM image
     DataOutStream(outfname, c_outIO);       //thread to write out a PGM image
-    distributor(c_inIO, c_outIO, c_control);//thread to coordinate work on image
+    distributor(c_inIO, c_outIO, c_control, workers, p);//thread to coordinate work on image
+    worker(workers[0], p);
+    worker(workers[1], p);
+    worker(workers[2], p);
+    worker(workers[3], p);
   }
 
   return 0;

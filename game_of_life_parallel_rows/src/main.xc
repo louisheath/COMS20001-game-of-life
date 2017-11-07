@@ -113,6 +113,11 @@ void distributor(chanend c_in, chanend c_out, chanend fromAcc, chanend worker[4]
 //
 /////////////////////////////////////////////////////////////////////////////////////////
 void worker(chanend fromFarmer) {
+
+
+
+
+    /*
     //store value of rows worker will work on
     uchar rowVal[IMWD][(IMHT / 4) + 2];
 
@@ -131,9 +136,9 @@ void worker(chanend fromFarmer) {
             int yUp = mod(IMHT, y-1);
             int yDown = mod(IMHT, y+1);
 
-            uchar neighbours[8] = {(val[xLeft][yUp]), (val[x][yUp]), (val[xRight][yUp]),
-                                   (val[xLeft][y]), (val[xRight][y]),
-                                   (val[xLeft][yDown]), (val[x][yDown]), (val[xRight][yDown])};
+            uchar neighbours[8] = {(rowVal[xLeft][yUp]), (rowVal[x][yUp]), (rowVal[xRight][yUp]),
+                                   (rowVal[xLeft][y]), (rowVal[xRight][y]),
+                                   (rowVal[xLeft][yDown]), (rowVal[x][yDown]), (rowVal[xRight][yDown])};
             int alive = 0;
             for (int i = 0; i < 8; i++) {
                 if (neighbours[i] == 0xFF) {
@@ -141,7 +146,7 @@ void worker(chanend fromFarmer) {
                 }
             }
             // If currently alive
-            if (val[x][y] == 0xFF) {
+            if (rowVal[x][y] == 0xFF) {
                 // If number of alive neighbours isn't two or three, die. Else stay alive by default
                 if (alive != 2 && alive != 3) {
                     newVal[x][y] = 0x0;
@@ -171,7 +176,7 @@ void worker(chanend fromFarmer) {
         for( int x = 0; x < IMWD; x++ ) { //go through each pixel per line
             newVal[x][y] = val[x][y];                   //transfer new pixels to old array
         }
-    }
+    }*/
 }
 
 /////////////////////////////////////////////////////////////////////////////////////////
@@ -257,17 +262,34 @@ void orientation( client interface i2c_master_if i2c, chanend toDist) {
 /////////////////////////////////////////////////////////////////////////////////////////
 int main(void) {
 
-i2c_master_if i2c[1];               //interface to orientation
+    /* SKELETON main():
 
-char infname[] = "test.pgm";     //put your input image path here
-char outfname[] = "testout.pgm"; //put your output image path here
-chan c_inIO, c_outIO, c_control, workers[4];    //extend your channel definitions here
+    i2c_master_if i2c[1];               //interface to orientation
 
-par {
-    i2c_master(i2c, 1, p_scl, p_sda, 10);   //server thread providing orientation data
-    orientation(i2c[0],c_control);        //client thread reading orientation data
-    DataInStream(infname, c_inIO);          //thread to read in a PGM image
-    DataOutStream(outfname, c_outIO);       //thread to write out a PGM image
+    char infname[] = "test.pgm";     //put your input image path here
+    char outfname[] = "testout.pgm"; //put your output image path here
+    chan c_inIO, c_outIO, c_control;    //extend your channel definitions here
+
+    par {
+        i2c_master(i2c, 1, p_scl, p_sda, 10);   //server thread providing orientation data
+        orientation(i2c[0],c_control);         //client thread reading orientation data
+        DataInStream(infname, c_inIO);          //thread to read in a PGM image
+        DataOutStream(outfname, c_outIO);       //thread to write out a PGM image
+        distributor(c_inIO, c_outIO, c_control);//thread to coordinate work on image
+    }
+    */
+
+  i2c_master_if i2c[1];                          // interface to orientation sensor
+
+  char infname[] = "test.pgm";                   // input image path
+  char outfname[] = "testout.pgm";               // output image path
+  chan c_inIO, c_outIO, c_control, workers[4];   // channel definitions
+
+  par {
+    i2c_master(i2c, 1, p_scl, p_sda, 10);            //server thread providing orientation data
+    orientation(i2c[0],c_control);                   //client thread reading orientation data
+    DataInStream(infname, c_inIO);                   //thread to read in a PGM image
+    DataOutStream(outfname, c_outIO);                //thread to write out a PGM image
     distributor(c_inIO, c_outIO, c_control, workers);//thread to coordinate work on image
     //intialise 4 workers
     worker(workers[0]);

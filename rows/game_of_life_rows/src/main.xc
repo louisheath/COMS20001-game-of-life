@@ -9,6 +9,7 @@
 
 #define  IMHT 16                  //image height
 #define  IMWD 16                  //image width
+#define  numW 4
 
 typedef unsigned char uchar;      //using uchar as shorthand
 
@@ -69,13 +70,29 @@ void DataInStream(char infname[], chanend c_out)
   return;
 }
 
-void worker(chanend f, uchar (*w)[IMWD]) {
-  f :> int id;
+void worker(chanend f) {
+}
+
+int inDivision(int x, int div) {           // is row x in the given division of the world?
+    if (div <= numW && div > 0) {
+        int divHeight = IMHT / numW;       // TODO: extend this so it catches floats
+        int inDiv = 0;
+
+        int lower = mod(IMHT, ((div - 1) * divHeight) - 1);
+        int upper = mod(IMHT, div * divHeight);
+
+        if (x >= lower && x <=upper) inDiv = 1;
+
+        return inDiv;
+    }
+    else fprintf(stderr, "Inputted division %d not in range 1-%d\n", div, numW);
 }
 
 // Farmer
-void distributor(chanend c_in, chanend c_out, chanend fromAcc, chanend workers[4], uchar (*w)[IMWD])
+void distributor(chanend c_in, chanend c_out, chanend fromAcc, chanend workers[4])
 {
+  // world array
+  uchar w[IMWD][IMHT];
 
   // Start up. DONT wait for tilt because I don't have the board
   printf( "ProcessImage: Start, size = %dx%d\n", IMHT, IMWD );
@@ -91,11 +108,36 @@ void distributor(chanend c_in, chanend c_out, chanend fromAcc, chanend workers[4
     }
   }
 
-  // let workers know the world state and their worker number
-  //   worker number will let them know which quarter to take
-  for (int i = 0; i < 4; i++) {
-      workers[i] :> i;
-  }
+  // divide array for each worker, each getting four rows and the rows above and below
+  uchar w0[IMWD][IMHT/numW +2],
+        w1[IMWD][IMHT/numW +2],
+        w2[IMWD][IMHT/numW +2],
+        w3[IMWD][IMHT/numW +2];
+  for( int y = 0; y < IMHT; y++ ) {       // go through all rows
+    if (inDivision(y, 1)) {               // if row y is in division 1
+      for( int x = 0; x < IMWD; x++ ) {
+        if (y == IMHT-1) w0[x][y] = w[x][numW+1];  // first group is taking rows 0,1,2,3,4,15
+        else w0[x][y] = w[x][y];                   // index 15 needs catching because array is only 6 tall
+      }
+    }
+    if (inDivision(y, 2)) {
+      for( int x = 0; x < IMWD; x++ ) {            // group two takes rows 3,4,5,6,7,8
+        printf("x:% y:%d",x,y);
+        w0[x][y - numW] = w[x][y];                 // so each y needs subtracting by numW to get 0,1,2,3,4,5
+      }
+    }
+    if (inDivision(y, 3)) {
+      for( int x = 0; x < IMWD; x++ ) {            // group three takes rows 7,8,9,10,11,12
+        w0[x][y - 2*numW] = w[x][y];               // so each y needs subtracting by 2*numW to get 0,1,2,3,4,5
+      }
+    }
+    if (inDivision(y, 4)) {
+      for( int x = 0; x < IMWD; x++ ) {            // group four takes rows 11,12,13,14,15,0
+        if (y == 0) w0[x][y] = w[x][numW+1];       // each y needs subtracting by 3*numW,
+        else w0[x][y - 3*numW] = w[x][y];          //   0 needs to be caught and replaced with numW+1 (last index)
+      }
+    }
+  }  // ^This is not DRY but writing in full for now to get it working
 
   printf( "\nOne processing round completed...\n" );
 }
@@ -188,20 +230,17 @@ i2c_master_if i2c[1];               //interface to orientation
 char infname[] = "test.pgm";     //put your input image path here
 char outfname[] = "testout.pgm"; //put your output image path here
 chan c_inIO, c_outIO, c_control, workers[4];    //extend your channel definitions here
-// 2D array representing world
-uchar (*p)[IMWD] = malloc(IMWD * IMHT);
-//sizeof (*p) == sizeof(uchar) * IMHT * IMWD;
 
 par {
     i2c_master(i2c, 1, p_scl, p_sda, 10);   //server thread providing orientation data
     orientation(i2c[0],c_control);        //client thread reading orientation data
     DataInStream(infname, c_inIO);          //thread to read in a PGM image
     DataOutStream(outfname, c_outIO);       //thread to write out a PGM image
-    distributor(c_inIO, c_outIO, c_control, workers, p);//thread to coordinate work on image
-    worker(workers[0], p);
-    worker(workers[1], p);
-    worker(workers[2], p);
-    worker(workers[3], p);
+    distributor(c_inIO, c_outIO, c_control, workers);//thread to coordinate work on image
+    worker(workers[0]);
+    worker(workers[1]);
+    worker(workers[2]);
+    worker(workers[3]);
   }
 
   return 0;

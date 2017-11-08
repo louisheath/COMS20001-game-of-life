@@ -1,5 +1,6 @@
-// COMS20001 - Cellular Automaton Farm - Initial Code Skeleton
-// (using the XMOS i2c accelerometer demo code)
+// COMS20001 - Game of Life: Jack Jones and Louis Heath
+// (using the XMOS i2c accelerometer)
+// Version 2 : Four workers
 
 #include <platform.h>
 #include <xs1.h>
@@ -72,15 +73,16 @@ void DataInStream(char infname[], chanend c_out)
 
 /////////////////////////////////////////////////////////////////////////////////////////
 //
-// Start your implementation by changing this function to implement the game of life
-// by farming out parts of the image to worker threads who implement it...
-// Currently the function just inverts the image
+// Distributer receives current world state from DataStreamIn,
+//             divides world and distributes it to workers,
+//             receives new cells from workers and builds new world,
+//             and sends new world to DataStreamOut
 //
 /////////////////////////////////////////////////////////////////////////////////////////
 void distributor(chanend c_in, chanend c_out, chanend fromAcc, chanend worker[4])
 {
-   uchar val[IMWD][IMHT]; //To store snapshot of current image
-   uchar updVal[IMWD][IMHT]; //To store snapshot of current image
+   uchar val[IMWD][IMHT];    // World stored in PGM file
+   uchar updVal[IMWD][IMHT]; // World after workers have evaluated
 
   //Starting up and wait for tilting of the xCore-200 Explorer
   printf( "ProcessImage: Start, size = %dx%d\n", IMHT, IMWD );
@@ -89,38 +91,36 @@ void distributor(chanend c_in, chanend c_out, chanend fromAcc, chanend worker[4]
 
   printf( "Processing...\n" );
 
-  for(int y = 0; y < IMHT; y++ ) {   //go through all lines
-      for( int x = 0; x < IMWD; x++ ) { //go through each pixel per line
-          c_in :> val[x][y];                   //read the pixel value
-      }
+  for(int y = 0; y < IMHT; y++ ) {       // Read every pixel into world array
+     for( int x = 0; x < IMWD; x++ ) {
+        c_in :> val[x][y];
+     }
   }
 
-  //divide work between workers
-  for(int i = 0; i < NWKS; i++) {
-      //printf("worker %d\n", i);
-      for(int y = 0; y < ((IMHT / NWKS) + 2); y++ ) {   //go through all lines
-            for( int x = 0; x < IMWD; x++ ) { //go through each pixel per line
-                //send over row of cells to new 2D array to be sent to workers
-                //consider the two extra rows below and above worked set of rows so that all rules can be followed
-
-                worker[i] <: val[x][mod(IMHT, (y + (i*(IMHT / NWKS)) - 1))];
-            }
-      }
-  }
-
-  for(int i = 0; i < NWKS; i++) {
-      for(int y = 0; y < ((IMHT / NWKS)); y++ ) {   //go through all lines
-          for( int x = 0; x < IMWD; x++ ) { //go through each pixel per line
-
-              worker[i] :> updVal[x][y + (i*(IMHT / NWKS))];
-          }
-      }
-  }
-
-  for(int y = 0; y < IMHT; y++ ) {   //go through all lines
-        for( int x = 0; x < IMWD; x++ ) { //go through each pixel per line
-            c_out<: updVal[x][y];
+  // Divide work between workers
+  for(int w = 0; w < NWKS; w++) {                       // for each of four workers
+     for(int y = 0; y < ((IMHT / NWKS) + 2); y++ ) {    // for the portion of rows to be given to the worker
+        for( int x = 0; x < IMWD; x++ ) {               // for every column
+           // send cell values to the worker, who will combine them into a new array
+           worker[w] <: val[x][mod(IMHT, (y + (w*(IMHT / NWKS)) - 1))];
         }
+     }
+  }
+
+  // Receive processed cells from workers
+  for(int w = 0; w < NWKS; w++) {                  // for each of four workers
+     for(int y = 0; y < ((IMHT / NWKS)); y++ ) {   // for each row that will be used in new array (edge rows not returned)
+        for( int x = 0; x < IMWD; x++ ) {          // for every column
+           // receive cell values from worker and place into new world array
+           worker[w] :> updVal[x][y + (w*(IMHT / NWKS))];
+        }
+     }
+  }
+
+  for(int y = 0; y < IMHT; y++ ) {
+     for( int x = 0; x < IMWD; x++ ) { // for every cell
+        c_out<: updVal[x][y];          // send cell information to DataOutStream
+     }
   }
 
   printf( "\nOne processing round completed...\n" );
@@ -131,69 +131,69 @@ void distributor(chanend c_in, chanend c_out, chanend fromAcc, chanend worker[4]
 // Initialise workers to work on a row of cells
 //
 /////////////////////////////////////////////////////////////////////////////////////////
-void worker(chanend fromFarmer) {
+void worker(chanend fromFarmer)
+{
+   // store value of rows worker will work on
+   uchar rowVal[IMWD][(IMHT / NWKS) + 2];
+   // array for output rows
+   uchar newVal[IMWD][(IMHT / NWKS)];
 
-    //store value of rows worker will work on
-    uchar rowVal[IMWD][(IMHT / NWKS) + 2];
-    uchar newVal[IMWD][(IMHT / NWKS)];
+   for( int y = 0; y < ((IMHT / NWKS) + 2); y++ ) {   // for every row to be input
+      for( int x = 0; x < IMWD; x++ ) {               // for every column
+         // read in rows cell by cell from distributer to be worked on
+         fromFarmer :> rowVal[x][y];
+      }
+   }
 
-    for(int y = 0; y < ((IMHT / NWKS) + 2); y++ ) {   //go through all lines
-        for( int x = 0; x < IMWD; x++ ) { //go through each pixel per line
-            //copy over row of cells to new 2D array to be worked
-            fromFarmer :> rowVal[x][y];
-            //printf( "-%4.1d ", rowVal[x][y] ); //show image values
-        }
-        //printf( "\n");
+   // Look at neighbouring cells and work out the next state of each cell
+   for( int y = 1; y < (IMHT / NWKS) + 1; y++ ) {   // for every row excluding edge rows
+      for( int x = 0; x < IMWD; x++ ) {             // for every column
+         // variables used in finding neighbours
+         int xRight = mod(IMWD, x+1);
+         int xLeft = mod(IMWD, x-1);
+         int yUp = y-1;
+         int yDown = y+1;
+         // store states of neighbours in array
+         uchar neighbours[8] = {(rowVal[xLeft][yUp]),   (rowVal[x][yUp]),   (rowVal[xRight][yUp]),
+                                (rowVal[xLeft][y]),                         (rowVal[xRight][y]),
+                                (rowVal[xLeft][yDown]), (rowVal[x][yDown]), (rowVal[xRight][yDown])};
+         // count number of alive neighbours
+         int alive = 0;
+         for (int i = 0; i < 8; i++) {
+            if (neighbours[i] == 0xFF) {
+               alive++;
+            }
+         }
+         // If currently alive
+         if (rowVal[x][y] == 0xFF) {
+            // If number of alive neighbours isn't two or three, die. Else stay alive by default
+            if (alive != 2 && alive != 3)
+               newVal[x][y - 1] = 0x0;
+            else
+               newVal[x][y - 1] = 0xFF;
+         }
+         // Else cell is currently dead: if three alive neighbours resurrect, else stay dead
+         else {
+            if (alive == 3)
+               newVal[x][y - 1] = 0xFF;
+            else
+               newVal[x][y - 1] = 0x0;
+         }
+      }
+   }
+
+    // Send new cell states to farmer for combining
+    for( int y = 0; y < (IMHT / NWKS); y++ ) {   // for every row excluding edge rows
+       for( int x = 0; x < IMWD; x++ ) {         // for each column
+          fromFarmer <: newVal[x][y];            // send to farmer (distributer)
+       }
     }
 
-    for( int y = 1; y < (IMHT / NWKS) + 1; y++ ) {   //go through all lines
-        for( int x = 0; x < IMWD; x++ ) { //go through each pixel per line
-            //store neighbours in 1D array
-            int xRight = mod(IMWD, x+1);
-            int xLeft = mod(IMWD, x-1);
-            int yUp = y-1;
-            int yDown = y+1;
-
-            uchar neighbours[8] = {(rowVal[xLeft][yUp]), (rowVal[x][yUp]), (rowVal[xRight][yUp]),
-                                   (rowVal[xLeft][y]), (rowVal[xRight][y]),
-                                   (rowVal[xLeft][yDown]), (rowVal[x][yDown]), (rowVal[xRight][yDown])};
-            int alive = 0;
-            for (int i = 0; i < 8; i++) {
-                if (neighbours[i] == 0xFF) {
-                    alive++;
-                }
-            }
-            // If currently alive
-            if (rowVal[x][y] == 0xFF) {
-                // If number of alive neighbours isn't two or three, die. Else stay alive by default
-                if (alive != 2 && alive != 3) {
-                    newVal[x][y - 1] = 0x0;
-                }
-                else {
-                    newVal[x][y - 1] = 0xFF;
-                }
-            }
-            // Else cell is currently dead: if three alive neighbours resurrect
-            else {
-                if (alive == 3) {
-                    newVal[x][y - 1] = 0xFF;
-                }
-                else newVal[x][y - 1] = 0x0;
-            }
-        }
-    }
-
-    for( int y = 0; y < (IMHT / NWKS); y++ ) {   //go through all lines
-        for( int x = 0; x < IMWD; x++ ) { //go through each pixel per line
-            fromFarmer <: newVal[x][y]; //send some modified pixel out
-            //printf( "-%4.1d ", newVal[x][y] ); //show image values
-        }
-        //printf( "\n"); //show image values
-    }
+    // TODO: iterating
     /*
     for( int y = 0; y < (IMHT / NWKS) + 2; y++ ) {   //go through all lines
-        for( int x = 0; x < IMWD; x++ ) { //go through each pixel per line
-            rowVal[x][y] = rowVal[x][y];                   //transfer new pixels to old array
+        for( int x = 0; x < IMWD; x++ ) {            //go through each pixel per line
+            rowVal[x][y] = rowVal[x][y];             //transfer new pixels to old array
         }
     }*/
 }
@@ -283,23 +283,6 @@ void orientation( client interface i2c_master_if i2c, chanend toDist) {
 /////////////////////////////////////////////////////////////////////////////////////////
 int main(void) {
 
-    /* SKELETON main():
-
-    i2c_master_if i2c[1];               //interface to orientation
-
-    char infname[] = "test.pgm";     //put your input image path here
-    char outfname[] = "testout.pgm"; //put your output image path here
-    chan c_inIO, c_outIO, c_control;    //extend your channel definitions here
-
-    par {
-        i2c_master(i2c, 1, p_scl, p_sda, 10);   //server thread providing orientation data
-        orientation(i2c[0],c_control);         //client thread reading orientation data
-        DataInStream(infname, c_inIO);          //thread to read in a PGM image
-        DataOutStream(outfname, c_outIO);       //thread to write out a PGM image
-        distributor(c_inIO, c_outIO, c_control);//thread to coordinate work on image
-    }
-    */
-
   i2c_master_if i2c[1];                          // interface to orientation sensor
 
   char infname[] = "test.pgm";                   // input image path
@@ -312,7 +295,7 @@ int main(void) {
     DataInStream(infname, c_inIO);                   //thread to read in a PGM image
     DataOutStream(outfname, c_outIO);                //thread to write out a PGM image
     distributor(c_inIO, c_outIO, c_control, workers);//thread to coordinate work on image
-    //intialise 4 workers
+    //initialise 4 workers
     worker(workers[0]);
     worker(workers[1]);
     worker(workers[2]);

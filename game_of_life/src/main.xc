@@ -107,7 +107,6 @@ void distributor(chanend c_in, chanend c_out, chanend fromAcc)
   }
 
   while(1) {
-      printf ("\nmans not hot");
       for( int y = 0; y < IMHT; y++ ) {   //go through all lines
          for( int x = 0; x < IMWD; x++ ) { //go through each pixel per line
             //store neighbours in 1D array
@@ -154,10 +153,10 @@ void distributor(chanend c_in, chanend c_out, chanend fromAcc)
 
       for( int y = 0; y < IMHT; y++ ) {   //go through all lines
           for( int x = 0; x < IMWD; x++ ) { //go through each pixel per line
-            newVal[x][y] = val[x][y];                   //transfer new pixels to old array
+            val[x][y] = newVal[x][y];                   //transfer new pixels to old array
           }
       }
-      printf( "\nOne processing round completed...\n" );
+      //printf( "\nOne processing round completed...\n" );
   }
 }
 
@@ -170,6 +169,7 @@ void DataOutStream(char outfname[], chanend c_in)
 {
   int res;
   uchar line[ IMWD ];
+  int x = 0;
 
   //Open PGM file
   printf( "DataOutStream: Start...\n" );
@@ -178,16 +178,30 @@ void DataOutStream(char outfname[], chanend c_in)
     printf( "DataOutStream: Error opening %s\n.", outfname );
     return;
   }
-
-  //Compile each line of the image and write the image line-by-line
-  for( int y = 0; y < IMHT; y++ ) {
-    for( int x = 0; x < IMWD; x++ ) {
-      c_in :> line[ x ];
-      printf( "-%4.1d ", line[ x ] ); //show image values
-    }
-    printf( "\n" );
-    _writeoutline( line, IMWD );
-    //printf( "DataOutStream: Line written...\n" );
+  while (x < 100){
+      //Compile each line of the image and write the image line-by-line
+      if (x == 99) {
+          for( int y = 0; y < IMHT; y++ ) {
+            for( int x = 0; x < IMWD; x++ ) {
+              c_in :> line[ x ];
+              printf( "-%4.1d ", line[ x ] ); //show image values
+            }
+            printf( "\n" );
+            _writeoutline( line, IMWD );
+            //printf( "DataOutStream: Line written...\n" );
+          }
+          x++;
+      }
+      else{
+          for( int y = 0; y < IMHT; y++ ) {
+              for( int x = 0; x < IMWD; x++ ) {
+                c_in :> line[ x ];
+              }
+              _writeoutline( line, IMWD );
+              //printf( "DataOutStream: Line written...\n" );
+          }
+          x++;
+      }
   }
 
   //Close the PGM image

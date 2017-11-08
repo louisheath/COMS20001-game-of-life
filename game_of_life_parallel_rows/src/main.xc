@@ -9,6 +9,7 @@
 
 #define  IMHT 16                  //image height
 #define  IMWD 16                  //image width
+#define  NWKS 4                   //number of workers
 
 typedef unsigned char uchar;      //using uchar as shorthand
 
@@ -79,6 +80,7 @@ void DataInStream(char infname[], chanend c_out)
 void distributor(chanend c_in, chanend c_out, chanend fromAcc, chanend worker[4])
 {
    uchar val[IMWD][IMHT]; //To store snapshot of current image
+   uchar updVal[IMWD][IMHT]; //To store snapshot of current image
 
   //Starting up and wait for tilting of the xCore-200 Explorer
   printf( "ProcessImage: Start, size = %dx%d\n", IMHT, IMWD );
@@ -93,17 +95,34 @@ void distributor(chanend c_in, chanend c_out, chanend fromAcc, chanend worker[4]
       }
   }
 
-  //divide work between 4 workers
-  for(int i = 0; i < 4; i++) {
-
-      for(int y = 0; y < ((IMHT / 4) + 2); y++ ) {   //go through all lines
+  //divide work between workers
+  for(int i = 0; i < NWKS; i++) {
+      //printf("worker %d\n", i);
+      for(int y = 0; y < ((IMHT / NWKS) + 2); y++ ) {   //go through all lines
             for( int x = 0; x < IMWD; x++ ) { //go through each pixel per line
                 //send over row of cells to new 2D array to be sent to workers
                 //consider the two extra rows below and above worked set of rows so that all rules can be followed
-                worker[i] <: val[x][mod(IMHT, (y + (i*(IMHT / 4)) - 1))];
+
+                worker[i] <: val[x][mod(IMHT, (y + (i*(IMHT / NWKS)) - 1))];
             }
       }
   }
+
+  for(int i = 0; i < NWKS; i++) {
+      for(int y = 0; y < ((IMHT / NWKS)); y++ ) {   //go through all lines
+          for( int x = 0; x < IMWD; x++ ) { //go through each pixel per line
+
+              worker[i] :> updVal[x][y + (i*(IMHT / NWKS))];
+          }
+      }
+  }
+
+  for(int y = 0; y < IMHT; y++ ) {   //go through all lines
+        for( int x = 0; x < IMWD; x++ ) { //go through each pixel per line
+            c_out<: updVal[x][y];
+        }
+  }
+
   printf( "\nOne processing round completed...\n" );
 }
 
@@ -114,27 +133,26 @@ void distributor(chanend c_in, chanend c_out, chanend fromAcc, chanend worker[4]
 /////////////////////////////////////////////////////////////////////////////////////////
 void worker(chanend fromFarmer) {
 
-
-
-
-    /*
     //store value of rows worker will work on
-    uchar rowVal[IMWD][(IMHT / 4) + 2];
+    uchar rowVal[IMWD][(IMHT / NWKS) + 2];
+    uchar newVal[IMWD][(IMHT / NWKS)];
 
-    for(int y = 0; y < ((IMHT / 4) + 2); y++ ) {   //go through all lines
+    for(int y = 0; y < ((IMHT / NWKS) + 2); y++ ) {   //go through all lines
         for( int x = 0; x < IMWD; x++ ) { //go through each pixel per line
             //copy over row of cells to new 2D array to be worked
             fromFarmer :> rowVal[x][y];
+            //printf( "-%4.1d ", rowVal[x][y] ); //show image values
         }
+        //printf( "\n");
     }
 
-    for( int y = 0; y < IMHT; y++ ) {   //go through all lines
-        for( int x = 0; x < (IMHT / 4) + 2; x++ ) { //go through each pixel per line
+    for( int y = 1; y < (IMHT / NWKS) + 1; y++ ) {   //go through all lines
+        for( int x = 0; x < IMWD; x++ ) { //go through each pixel per line
             //store neighbours in 1D array
             int xRight = mod(IMWD, x+1);
             int xLeft = mod(IMWD, x-1);
-            int yUp = mod(IMHT, y-1);
-            int yDown = mod(IMHT, y+1);
+            int yUp = y-1;
+            int yDown = y+1;
 
             uchar neighbours[8] = {(rowVal[xLeft][yUp]), (rowVal[x][yUp]), (rowVal[xRight][yUp]),
                                    (rowVal[xLeft][y]), (rowVal[xRight][y]),
@@ -149,32 +167,33 @@ void worker(chanend fromFarmer) {
             if (rowVal[x][y] == 0xFF) {
                 // If number of alive neighbours isn't two or three, die. Else stay alive by default
                 if (alive != 2 && alive != 3) {
-                    newVal[x][y] = 0x0;
+                    newVal[x][y - 1] = 0x0;
                 }
-                else
-                {
-                    newVal[x][y] = 0xFF;
+                else {
+                    newVal[x][y - 1] = 0xFF;
                 }
             }
             // Else cell is currently dead: if three alive neighbours resurrect
             else {
                 if (alive == 3) {
-                    newVal[x][y] = 0xFF;
+                    newVal[x][y - 1] = 0xFF;
                 }
-                else newVal[x][y] = 0x0;
+                else newVal[x][y - 1] = 0x0;
             }
         }
     }
 
-    for( int y = 0; y < IMHT; y++ ) {   //go through all lines
+    for( int y = 0; y < (IMHT / NWKS); y++ ) {   //go through all lines
         for( int x = 0; x < IMWD; x++ ) { //go through each pixel per line
-            c_out <: newVal[x][y]; //send some modified pixel out
+            fromFarmer <: newVal[x][y]; //send some modified pixel out
+            //printf( "-%4.1d ", newVal[x][y] ); //show image values
         }
+        //printf( "\n"); //show image values
     }
-
-    for( int y = 0; y < IMHT; y++ ) {   //go through all lines
+    /*
+    for( int y = 0; y < (IMHT / NWKS) + 2; y++ ) {   //go through all lines
         for( int x = 0; x < IMWD; x++ ) { //go through each pixel per line
-            newVal[x][y] = val[x][y];                   //transfer new pixels to old array
+            rowVal[x][y] = rowVal[x][y];                   //transfer new pixels to old array
         }
     }*/
 }
@@ -201,9 +220,11 @@ void DataOutStream(char outfname[], chanend c_in)
   for( int y = 0; y < IMHT; y++ ) {
     for( int x = 0; x < IMWD; x++ ) {
       c_in :> line[ x ];
+      printf( "-%4.1d ", line[ x ] ); //show image values
     }
+    printf( "\n" );
     _writeoutline( line, IMWD );
-    printf( "DataOutStream: Line written...\n" );
+    //printf( "DataOutStream: Line written...\n" );
   }
 
   //Close the PGM image

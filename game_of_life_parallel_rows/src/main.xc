@@ -135,7 +135,7 @@ void distributor(chanend c_in, chanend c_out, chanend fromAcc, chanend worker[NW
 // Initialise workers to work on a row of cells
 //
 /////////////////////////////////////////////////////////////////////////////////////////
-void worker(chanend fromFarmer)
+void worker(chanend fromFarmer, chanend wLeft, chanend wRight)
 {
     // store value of rows worker will work on
     uchar rowVal[IMWD][(IMHT / NWKS) + 2];
@@ -311,20 +311,28 @@ int main(void) {
 
   i2c_master_if i2c[1];                          // interface to orientation sensor
 
-  chan c_inIO, c_outIO, c_control, workers[NWKS];   // channel definitions
+  // Channel definitions
+  chan c_inIO,     // DataStreamIn
+       c_outIO,    // DataStreamOut
+       c_control,  // Orientation sensor
+       WtoD[NWKS], // Workers to Distributer
+       WtoW[NWKS]; // Workers to Workers
 
   par {
-    on tile[0] : i2c_master(i2c, 1, p_scl, p_sda, 10);            //server thread providing orientation data
-    on tile[0] : orientation(i2c[0],c_control);                   //client thread reading orientation data
-    on tile[0] : DataInStream("test.pgm", c_inIO);                   //thread to read in a PGM image
-    on tile[0] : DataOutStream("testout.pgm", c_outIO);                //thread to write out a PGM image
-    on tile[0] : distributor(c_inIO, c_outIO, c_control, workers);//thread to coordinate work on image
+    on tile[0] : i2c_master(i2c, 1, p_scl, p_sda, 10);              //server thread providing orientation data
+    on tile[0] : orientation(i2c[0],c_control);                     //client thread reading orientation data
+    on tile[0] : DataInStream("test.pgm", c_inIO);                  //thread to read in a PGM image
+    on tile[0] : DataOutStream("testout.pgm", c_outIO);             //thread to write out a PGM image
+    on tile[0] : distributor(c_inIO, c_outIO, c_control, WtoD);     //thread to coordinate work on image
     //initialise 4 workers
-    on tile[1] : worker(workers[0]);
-    on tile[1] : worker(workers[1]);
-    on tile[1] : worker(workers[2]);
-    on tile[1] : worker(workers[3]);
-
+    on tile[1] : worker(WtoD[0], WtoW[3], WtoW[0]);
+    on tile[1] : worker(WtoD[1], WtoW[0], WtoW[1]);
+    on tile[1] : worker(WtoD[2], WtoW[1], WtoW[2]);
+    on tile[1] : worker(WtoD[3], WtoW[2], WtoW[3]);
+    // channels between workers: e.g. 4 workers
+    //
+    //    <--- w0 <-----> w1 <-----> w2 <-----> w3 --->
+    //  WtoW[3]   WtoW[0]    WtoW[1]    WtoW[2]    WtoW[3]
   }
 
   return 0;

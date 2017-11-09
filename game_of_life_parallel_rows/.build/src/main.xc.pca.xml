@@ -34,7 +34,7 @@
 <fDef name="start_read_request" global="true" interface="i2c_slave_callback_if" noreturn="false" doNotSpecialize="false" numParams="0"/>
 <fDef name="start_write_request" global="true" interface="i2c_slave_callback_if" noreturn="false" doNotSpecialize="false" numParams="0"/>
 <fDef name="stop_bit" global="true" interface="i2c_slave_callback_if" noreturn="false" doNotSpecialize="false" numParams="0"/>
-<fDef name="worker" global="true" noreturn="false" doNotSpecialize="false" numParams="1"/>
+<fDef name="worker" global="true" noreturn="false" doNotSpecialize="false" numParams="3"/>
 <fDef name="write" global="true" interface="i2c_master_async_if" noreturn="false" doNotSpecialize="false" numParams="4"/>
 <fDef name="write" global="true" interface="i2c_master_if" noreturn="false" doNotSpecialize="false" numParams="5"/>
 <fDef name="write_reg" global="true" interface="i2c_master_if" noreturn="false" doNotSpecialize="true" numParams="4"/>
@@ -851,57 +851,69 @@
     </values>
   </arg>
 </fCall>
-<fCall name="worker" global="true" numArgs="1" impId="5">
+<fCall name="worker" global="true" numArgs="3" impId="5">
   <arg num="0">
     <values>
       <value type="unknown"/>
     </values>
   </arg>
-</fCall>
-<fCall name="worker" global="true" numArgs="1" impId="6">
-  <arg num="0">
+  <arg num="1">
+    <values>
+      <value type="unknown"/>
+    </values>
+  </arg>
+  <arg num="2">
     <values>
       <value type="unknown"/>
     </values>
   </arg>
 </fCall>
-<fCall name="worker" global="true" numArgs="1" impId="7">
+<fCall name="worker" global="true" numArgs="3" impId="6">
   <arg num="0">
     <values>
       <value type="unknown"/>
     </values>
   </arg>
-</fCall>
-<fCall name="worker" global="true" numArgs="1" impId="8">
-  <arg num="0">
+  <arg num="1">
+    <values>
+      <value type="unknown"/>
+    </values>
+  </arg>
+  <arg num="2">
     <values>
       <value type="unknown"/>
     </values>
   </arg>
 </fCall>
-<fCall name="worker" global="true" numArgs="1" impId="9">
+<fCall name="worker" global="true" numArgs="3" impId="7">
   <arg num="0">
     <values>
       <value type="unknown"/>
     </values>
   </arg>
-</fCall>
-<fCall name="worker" global="true" numArgs="1" impId="10">
-  <arg num="0">
+  <arg num="1">
+    <values>
+      <value type="unknown"/>
+    </values>
+  </arg>
+  <arg num="2">
     <values>
       <value type="unknown"/>
     </values>
   </arg>
 </fCall>
-<fCall name="worker" global="true" numArgs="1" impId="11">
+<fCall name="worker" global="true" numArgs="3" impId="8">
   <arg num="0">
     <values>
       <value type="unknown"/>
     </values>
   </arg>
-</fCall>
-<fCall name="worker" global="true" numArgs="1" impId="12">
-  <arg num="0">
+  <arg num="1">
+    <values>
+      <value type="unknown"/>
+    </values>
+  </arg>
+  <arg num="2">
     <values>
       <value type="unknown"/>
     </values>

@@ -60,9 +60,9 @@ void DataInStream(char infname[], chanend c_out)
     _readinline( line, IMWD );
     for( int x = 0; x < IMWD; x++ ) {
       c_out <: line[ x ];
-      printf( "-%4.1d ", line[ x ] ); //show image values
+      //printf( "-%4.1d ", line[ x ] ); //show image values
     }
-    printf( "\n" );
+    //printf( "\n" );
   }
 
   //Close PGM image file
@@ -97,9 +97,9 @@ void distributor(chanend c_in, chanend c_out, chanend fromAcc, chanend worker[NW
      }
   }
 
-  while(1){
+  //while(1){
       // Divide work between workers
-      for(int w = 0; w < NWKS; w++) {                  // for each of the workers
+      for(int w = 0; w < NWKS; w++) {                       // for each of the workers
          for(int y = 0; y < ((IMHT / NWKS) + 2); y++ ) {    // for the portion of rows to be given to the worker
             for( int x = 0; x < IMWD; x++ ) {               // for every column
                // send cell values to the worker, who will combine them into a new array
@@ -118,14 +118,14 @@ void distributor(chanend c_in, chanend c_out, chanend fromAcc, chanend worker[NW
          }
       }
 
-      //Send processed data to data out stream
+      // Send processed data to DataOutStream
       for(int y = 0; y < IMHT; y++ ) {
          for( int x = 0; x < IMWD; x++ ) { // for every cell
             c_out<: updVal[x][y];          // send cell information to DataOutStream
             val[x][y] = updVal[x][y];
          }
       }
-  }
+  //}
 
  //printf( "\nOne processing round completed...\n" );
 }
@@ -135,24 +135,28 @@ void distributor(chanend c_in, chanend c_out, chanend fromAcc, chanend worker[NW
 // Initialise workers to work on a row of cells
 //
 /////////////////////////////////////////////////////////////////////////////////////////
-void worker(chanend fromFarmer, chanend wLeft, chanend wRight)
+void worker(int id, chanend fromFarmer, chanend wLeft, chanend wRight)
 {
-    // store value of rows worker will work on
+    // number of rows worker is processing (excluding ghost rows)
+    int load = IMHT / NWKS;
+    // array of rows worker will work on
     uchar rowVal[IMWD][(IMHT / NWKS) + 2];
     // array for output rows
     uchar newVal[IMWD][(IMHT / NWKS)];
-    //iteration counter
+    // iteration counter
     int i = 0;
 
+    // contruct array to work on
     for( int y = 0; y < ((IMHT / NWKS) + 2); y++ ) {   // for every row to be input
-      for( int x = 0; x < IMWD; x++ ) {               // for every column
+      for( int x = 0; x < IMWD; x++ ) {                // for every column
          // read in rows cell by cell from distributer to be worked on
          fromFarmer :> rowVal[x][y];
       }
    }
 
-    while(i < 100){
-        i++;
+    while(i < 10){
+       i++;
+       //printf("iteration: %d\n", i);
 
        // Look at neighbouring cells and work out the next state of each cell
        for( int y = 1; y < (IMHT / NWKS) + 1; y++ ) {   // for every row excluding edge rows
@@ -191,13 +195,63 @@ void worker(chanend fromFarmer, chanend wLeft, chanend wRight)
           }
        }
 
+       // update processed rows for use in next iteration
        for( int y = 0; y < ((IMHT / NWKS)); y++ ) {   // for every row excluding edge rows
           for( int x = 0; x < IMWD; x++ ) {              // for each column
               rowVal[x][y + 1] = newVal[x][y];            // update non-overlapping rows
           }
        }
 
+
+       // Get new ghost row states so that next iteration can be calculated
+       // as well as send ghost row states for other workers to use
+       // e.g:
+       //    w0 <--- w1      w2 <--- w3
+       //    w0      w1 ---> w2      w3 --->
+       //    w0 ---> w1      w2 ---> w3
+       //    w0      w1 <--- w2      w3 <---
+
+
+       if (id % 2 == 1) { // odd numbered workers
+           for ( int x = 0; x < IMWD; x++ ) {            // 1. send to left
+               wLeft <: newVal[x][0];
+               wLeft <: newVal[x][load - 1];
+           }
+           for ( int x = 0; x < IMWD; x++ ) {            // 2. send to right
+               wRight <: newVal[x][0];
+               wRight <: newVal[x][load - 1];
+           }
+           for ( int x = 0; x < IMWD; x++ ) {            // 3. receive from left
+               wLeft :> rowVal[x][0];
+               wLeft :> rowVal[x][load + 1];
+           }
+           for ( int x = 0; x < IMWD; x++ ) {            // 4. receive from right
+               wRight :> rowVal[x][0];
+               wRight :> rowVal[x][load + 1];
+           }
+       }
+       else {             // even numbered workers
+           for ( int x = 0; x < IMWD; x++ ) {            // 4. receive from right
+               wRight :> rowVal[x][0];
+               wRight :> rowVal[x][load + 1];
+           }
+           for ( int x = 0; x < IMWD; x++ ) {            // 2. receive from left
+               wLeft :> rowVal[x][0];
+               wLeft :> rowVal[x][load + 1];
+           }
+           for ( int x = 0; x < IMWD; x++ ) {            // 3. send to right
+               wRight <: newVal[x][0];
+               wRight <: newVal[x][load - 1];
+           }
+           for ( int x = 0; x < IMWD; x++ ) {            // 4. send to left
+               wLeft <: newVal[x][0];
+               wLeft <: newVal[x][load - 1];
+          }
+       }
     }
+
+    printf("Worker %d iterations complete\n", id);
+
 
     // Send new cell states to farmer for combining
     for( int y = 0; y < (IMHT / NWKS); y++ ) {   // for every row excluding edge rows
@@ -205,6 +259,7 @@ void worker(chanend fromFarmer, chanend wLeft, chanend wRight)
           fromFarmer <: newVal[x][y];            // send to farmer (distributer)
        }
     }
+    printf("Worker %d passed cells to distributer\n", id);
 }
 
 /////////////////////////////////////////////////////////////////////////////////////////
@@ -325,10 +380,10 @@ int main(void) {
     on tile[0] : DataOutStream("testout.pgm", c_outIO);             //thread to write out a PGM image
     on tile[0] : distributor(c_inIO, c_outIO, c_control, WtoD);     //thread to coordinate work on image
     //initialise 4 workers
-    on tile[1] : worker(WtoD[0], WtoW[3], WtoW[0]);
-    on tile[1] : worker(WtoD[1], WtoW[0], WtoW[1]);
-    on tile[1] : worker(WtoD[2], WtoW[1], WtoW[2]);
-    on tile[1] : worker(WtoD[3], WtoW[2], WtoW[3]);
+    on tile[1] : worker(0, WtoD[0], WtoW[3], WtoW[0]);
+    on tile[1] : worker(1, WtoD[1], WtoW[0], WtoW[1]);
+    on tile[1] : worker(2, WtoD[2], WtoW[1], WtoW[2]);
+    on tile[1] : worker(3, WtoD[3], WtoW[2], WtoW[3]);
     // channels between workers: e.g. 4 workers
     //
     //    <--- w0 <-----> w1 <-----> w2 <-----> w3 --->

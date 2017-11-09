@@ -10,12 +10,12 @@
 
 #define  IMHT 16                  //image height
 #define  IMWD 16                  //image width
-#define  NWKS 2                   //number of workers
+#define  NWKS 4                   //number of workers
 
 typedef unsigned char uchar;      //using uchar as shorthand
 
-port p_scl = XS1_PORT_1E;         //interface ports to orientation
-port p_sda = XS1_PORT_1F;
+on tile[0]:port p_scl = XS1_PORT_1E;         //interface ports to orientation
+on tile[0]:port p_sda = XS1_PORT_1F;
 
 #define FXOS8700EQ_I2C_ADDR 0x1E  //register addresses for orientation
 #define FXOS8700EQ_XYZ_DATA_CFG_REG 0x0E
@@ -73,13 +73,13 @@ void DataInStream(char infname[], chanend c_out)
 
 /////////////////////////////////////////////////////////////////////////////////////////
 //
-// Distributer receives current world state from DataStreamIn,
+// Distributor receives current world state from DataStreamIn,
 //             divides world and distributes it to workers,
 //             receives new cells from workers and builds new world,
 //             and sends new world to DataStreamOut
 //
 /////////////////////////////////////////////////////////////////////////////////////////
-void distributor(chanend c_in, chanend c_out, chanend fromAcc, chanend worker[4])
+void distributor(chanend c_in, chanend c_out, chanend fromAcc, chanend worker[NWKS])
 {
    uchar val[IMWD][IMHT];    // World stored in PGM file
    uchar updVal[IMWD][IMHT]; // World after workers have evaluated
@@ -87,7 +87,7 @@ void distributor(chanend c_in, chanend c_out, chanend fromAcc, chanend worker[4]
   //Starting up and wait for tilting of the xCore-200 Explorer
   printf( "ProcessImage: Start, size = %dx%d\n", IMHT, IMWD );
   printf( "Waiting for Board Tilt...\n" );
-  fromAcc :> int value;
+  //fromAcc :> int value;
 
   printf( "Processing...\n" );
 
@@ -99,20 +99,17 @@ void distributor(chanend c_in, chanend c_out, chanend fromAcc, chanend worker[4]
 
   while(1){
       // Divide work between workers
+      for(int w = 0; w < NWKS; w++) {                  // for each of the workers
          for(int y = 0; y < ((IMHT / NWKS) + 2); y++ ) {    // for the portion of rows to be given to the worker
             for( int x = 0; x < IMWD; x++ ) {               // for every column
                // send cell values to the worker, who will combine them into a new array
-                par {
-                    worker[0] <: val[x][mod(IMHT, (y + (0*(IMHT / NWKS)) - 1))];
-                    worker[1] <: val[x][mod(IMHT, (y + (1*(IMHT / NWKS)) - 1))];
-                    worker[2] <: val[x][mod(IMHT, (y + (2*(IMHT / NWKS)) - 1))];
-                    worker[3] <: val[x][mod(IMHT, (y + (3*(IMHT / NWKS)) - 1))];
-                }
+               worker[w] <: val[x][mod(IMHT, (y + (w*(IMHT / NWKS)) - 1))];
             }
          }
+      }
 
       // Receive processed cells from workers
-      for(int w = 0; w < NWKS; w++) {                  // for each of four workers
+      for(int w = 0; w < NWKS; w++) {                  // for each of the workers
          for(int y = 0; y < ((IMHT / NWKS)); y++ ) {   // for each row that will be used in new array (edge rows not returned)
             for( int x = 0; x < IMWD; x++ ) {          // for every column
                // receive cell values from worker and place into new world array
@@ -125,14 +122,9 @@ void distributor(chanend c_in, chanend c_out, chanend fromAcc, chanend worker[4]
       for(int y = 0; y < IMHT; y++ ) {
          for( int x = 0; x < IMWD; x++ ) { // for every cell
             c_out<: updVal[x][y];          // send cell information to DataOutStream
+            val[x][y] = updVal[x][y];
          }
       }
-
-      for( int y = 0; y < IMHT; y++ ) {   //go through all lines
-          for( int x = 0; x < IMWD; x++ ) {            //go through each pixel per line
-              val[x][y] = updVal[x][y];             //transfer new pixels to old array
-          }
-     }
   }
 
  //printf( "\nOne processing round completed...\n" );
@@ -145,18 +137,22 @@ void distributor(chanend c_in, chanend c_out, chanend fromAcc, chanend worker[4]
 /////////////////////////////////////////////////////////////////////////////////////////
 void worker(chanend fromFarmer)
 {
-    while(1){
-       // store value of rows worker will work on
-       uchar rowVal[IMWD][(IMHT / NWKS) + 2];
-       // array for output rows
-       uchar newVal[IMWD][(IMHT / NWKS)];
+    // store value of rows worker will work on
+    uchar rowVal[IMWD][(IMHT / NWKS) + 2];
+    // array for output rows
+    uchar newVal[IMWD][(IMHT / NWKS)];
+    //iteration counter
+    int i = 0;
 
-       for( int y = 0; y < ((IMHT / NWKS) + 2); y++ ) {   // for every row to be input
-          for( int x = 0; x < IMWD; x++ ) {               // for every column
-             // read in rows cell by cell from distributer to be worked on
-             fromFarmer :> rowVal[x][y];
-          }
-       }
+    for( int y = 0; y < ((IMHT / NWKS) + 2); y++ ) {   // for every row to be input
+      for( int x = 0; x < IMWD; x++ ) {               // for every column
+         // read in rows cell by cell from distributer to be worked on
+         fromFarmer :> rowVal[x][y];
+      }
+   }
+
+    while(i < 100){
+        i++;
 
        // Look at neighbouring cells and work out the next state of each cell
        for( int y = 1; y < (IMHT / NWKS) + 1; y++ ) {   // for every row excluding edge rows
@@ -195,12 +191,19 @@ void worker(chanend fromFarmer)
           }
        }
 
-        // Send new cell states to farmer for combining
-        for( int y = 0; y < (IMHT / NWKS); y++ ) {   // for every row excluding edge rows
-           for( int x = 0; x < IMWD; x++ ) {         // for each column
-              fromFarmer <: newVal[x][y];            // send to farmer (distributer)
-           }
-        }
+       for( int y = 0; y < ((IMHT / NWKS)); y++ ) {   // for every row excluding edge rows
+          for( int x = 0; x < IMWD; x++ ) {              // for each column
+              rowVal[x][y + 1] = newVal[x][y];            // update non-overlapping rows
+          }
+       }
+
+    }
+
+    // Send new cell states to farmer for combining
+    for( int y = 0; y < (IMHT / NWKS); y++ ) {   // for every row excluding edge rows
+       for( int x = 0; x < IMWD; x++ ) {         // for each column
+          fromFarmer <: newVal[x][y];            // send to farmer (distributer)
+       }
     }
 }
 
@@ -213,7 +216,6 @@ void DataOutStream(char outfname[], chanend c_in)
 {
   int res;
   uchar line[ IMWD ];
-  int x = 0;
 
   //Open PGM file
   printf( "DataOutStream: Start...\n" );
@@ -222,10 +224,12 @@ void DataOutStream(char outfname[], chanend c_in)
     printf( "DataOutStream: Error opening %s\n.", outfname );
     return;
   }
+  //iteration counter
+  int i = 0;
 
-  while (x < 100){
+  while (i < 100){
         //Compile each line of the image and write the image line-by-line
-        if (x == 99) {
+        if (i == 99) {
             for( int y = 0; y < IMHT; y++ ) {
               for( int x = 0; x < IMWD; x++ ) {
                 c_in :> line[ x ];
@@ -235,7 +239,7 @@ void DataOutStream(char outfname[], chanend c_in)
               _writeoutline( line, IMWD );
               //printf( "DataOutStream: Line written...\n" );
             }
-            x++;
+            i++;
         }
         else{
             for( int y = 0; y < IMHT; y++ ) {
@@ -245,7 +249,7 @@ void DataOutStream(char outfname[], chanend c_in)
                 _writeoutline( line, IMWD );
                 //printf( "DataOutStream: Line written...\n" );
             }
-            x++;
+            i++;
         }
     }
 
@@ -292,7 +296,7 @@ void orientation( client interface i2c_master_if i2c, chanend toDist) {
     if (!tilted) {
       if (x>30) {
         tilted = 1 - tilted;
-        toDist <: 1;
+        //toDist <: 1;
       }
     }
   }
@@ -307,19 +311,20 @@ int main(void) {
 
   i2c_master_if i2c[1];                          // interface to orientation sensor
 
-  chan c_inIO, c_outIO, c_control, workers[4];   // channel definitions
+  chan c_inIO, c_outIO, c_control, workers[NWKS];   // channel definitions
 
   par {
     on tile[0] : i2c_master(i2c, 1, p_scl, p_sda, 10);            //server thread providing orientation data
     on tile[0] : orientation(i2c[0],c_control);                   //client thread reading orientation data
     on tile[0] : DataInStream("test.pgm", c_inIO);                   //thread to read in a PGM image
     on tile[0] : DataOutStream("testout.pgm", c_outIO);                //thread to write out a PGM image
-    on tile[1] : distributor(c_inIO, c_outIO, c_control, workers);//thread to coordinate work on image
+    on tile[0] : distributor(c_inIO, c_outIO, c_control, workers);//thread to coordinate work on image
     //initialise 4 workers
     on tile[1] : worker(workers[0]);
     on tile[1] : worker(workers[1]);
     on tile[1] : worker(workers[2]);
     on tile[1] : worker(workers[3]);
+
   }
 
   return 0;

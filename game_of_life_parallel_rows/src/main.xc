@@ -81,54 +81,69 @@ void DataInStream(char infname[], chanend c_out)
 /////////////////////////////////////////////////////////////////////////////////////////
 void distributor(chanend c_in, chanend c_out, chanend fromAcc, chanend worker[NWKS])
 {
-   uchar val[IMWD][IMHT];    // World stored in PGM file
-   uchar updVal[IMWD][IMHT]; // World after workers have evaluated
+    uchar val[IMWD][IMHT];    // World state
 
-  //Starting up and wait for tilting of the xCore-200 Explorer
-  printf( "ProcessImage: Start, size = %dx%d\n", IMHT, IMWD );
-  printf( "Waiting for Board Tilt...\n" );
-  //fromAcc :> int value;
+    //Starting up and wait for tilting of the xCore-200 Explorer
+    printf( "ProcessImage: Start, size = %dx%d\n", IMHT, IMWD );
+    printf( "Waiting for Board Tilt...\n" );
+    //fromAcc :> int value;
 
-  printf( "Processing...\n" );
+    printf( "Processing...\n" );
 
-  for(int y = 0; y < IMHT; y++ ) {       // Read every pixel into world array
-     for( int x = 0; x < IMWD; x++ ) {
-        c_in :> val[x][y];
-     }
-  }
+    for(int y = 0; y < IMHT; y++ ) {       // Read every pixel into world array
+        for( int x = 0; x < IMWD; x++ ) {
+           c_in :> val[x][y];
+        }
+    }
 
-  //while(1){
-      // Divide work between workers
-      for(int w = 0; w < NWKS; w++) {                       // for each of the workers
-         for(int y = 0; y < ((IMHT / NWKS) + 2); y++ ) {    // for the portion of rows to be given to the worker
+    // Divide work between workers
+    for(int w = 0; w < NWKS; w++) {                         // for each of the workers
+        for(int y = 0; y < ((IMHT / NWKS) + 2); y++ ) {     // for the portion of rows to be given to the worker
             for( int x = 0; x < IMWD; x++ ) {               // for every column
-               // send cell values to the worker, who will combine them into a new array
-               worker[w] <: val[x][mod(IMHT, (y + (w*(IMHT / NWKS)) - 1))];
+                // send cell values to the worker, who will combine them into a new array
+                worker[w] <: val[x][mod(IMHT, (y + (w*(IMHT / NWKS)) - 1))];
             }
-         }
-      }
+        }
+    }
 
-      // Receive processed cells from workers
-      for(int w = 0; w < NWKS; w++) {                  // for each of the workers
-         for(int y = 0; y < ((IMHT / NWKS)); y++ ) {   // for each row that will be used in new array (edge rows not returned)
+    // Receive processed cells from workers
+    for(int w = 0; w < NWKS; w++) {                  // for each of the workers
+        for(int y = 0; y < ((IMHT / NWKS)); y++ ) {   // for each row that will be used in new array (edge rows not returned)
             for( int x = 0; x < IMWD; x++ ) {          // for every column
                // receive cell values from worker and place into new world array
-               worker[w] :> updVal[x][y + (w*(IMHT / NWKS))];
+               worker[w] :> val[x][y + (w*(IMHT / NWKS))];
             }
-         }
-      }
+        }
+    }
 
-      // Send processed data to DataOutStream
-      for(int y = 0; y < IMHT; y++ ) {
-         for( int x = 0; x < IMWD; x++ ) { // for every cell
-            c_out<: updVal[x][y];          // send cell information to DataOutStream
-            val[x][y] = updVal[x][y];
-         }
-      }
-  //}
+    // Send processed data to DataOutStream
+    for(int y = 0; y < IMHT; y++ ) {
+        for( int x = 0; x < IMWD; x++ ) { // for every cell
+            c_out <: val[x][y];          // send cell information to DataOutStream
+        }
+    }
 
- //printf( "\nOne processing round completed...\n" );
+    //printf( "\nOne processing round completed...\n" );
 }
+
+int getNeighbours(int x, int y, uchar rowVal[IMWD][IMHT / NWKS + 2]) {
+    // variables used in finding neighbours
+    int xRight = mod(IMWD, x+1);
+    int xLeft = mod(IMWD, x-1);
+    int yUp = y-1;
+    int yDown = y+1;
+    // store states of neighbours in array
+    uchar neighbours[8] = {(rowVal[xLeft][yUp]),   (rowVal[x][yUp]),   (rowVal[xRight][yUp]),
+                           (rowVal[xLeft][y]),                         (rowVal[xRight][y]),
+                           (rowVal[xLeft][yDown]), (rowVal[x][yDown]), (rowVal[xRight][yDown])};
+    // count number of alive neighbours
+    int alive = 0;
+    for (int i = 0; i < 8; i++) {
+        if (neighbours[i] == 0xFF) alive++;
+    }
+    return alive;
+}
+
 
 /////////////////////////////////////////////////////////////////////////////////////////
 //
@@ -147,128 +162,94 @@ void worker(int id, chanend fromFarmer, chanend wLeft, chanend wRight)
     int i = 0;
 
     // contruct array to work on
-    for( int y = 0; y < ((IMHT / NWKS) + 2); y++ ) {   // for every row to be input
-      for( int x = 0; x < IMWD; x++ ) {                // for every column
-         // read in rows cell by cell from distributer to be worked on
-         fromFarmer :> rowVal[x][y];
-      }
-   }
+    for( int y = 0; y < (load + 2); y++ ) {     // for every row to be input
+        for( int x = 0; x < IMWD; x++ ) {         // for every column
+            // read in rows cell by cell from distributer to be worked on
+            fromFarmer :> rowVal[x][y];
+        }
+    }
 
-    while (i < 10) {
-       i++;
-//       if (id == 2) {
-//           printf("Worker %d starting iteration %d with arrays:\n", id, i);
-//            for( int y = 0; y < load + 2; y++ ) {
-//              for( int x = 0; x < IMWD; x++ ) {
-//                printf( "-%4.1d ", rowVal[x][y] ); //show image values
-//              }
-//              printf( "\n" );
-//            }
-//       }
+    while (i < 100) {
+        i++;
 
-       // Look at neighbouring cells and work out the next state of each cell
-       for( int y = 1; y < (IMHT / NWKS) + 1; y++ ) {   // for every row excluding edge rows
-          for( int x = 0; x < IMWD; x++ ) {             // for every column
-             // variables used in finding neighbours
-             int xRight = mod(IMWD, x+1);
-             int xLeft = mod(IMWD, x-1);
-             int yUp = y-1;
-             int yDown = y+1;
-             // store states of neighbours in array
-             uchar neighbours[8] = {(rowVal[xLeft][yUp]),   (rowVal[x][yUp]),   (rowVal[xRight][yUp]),
-                                    (rowVal[xLeft][y]),                         (rowVal[xRight][y]),
-                                    (rowVal[xLeft][yDown]), (rowVal[x][yDown]), (rowVal[xRight][yDown])};
-             // count number of alive neighbours
-             int alive = 0;
-             for (int i = 0; i < 8; i++) {
-                if (neighbours[i] == 0xFF) {
-                   alive++;
+        // Look at neighbouring cells and work out the next state of each cell
+        for( int y = 1; y < load + 1; y++ ) {   // for every row excluding edge rows
+            for( int x = 0; x < IMWD; x++ ) {            // for every column
+                // set cell to alive by default
+                newVal[x][y - 1] = 0xFF;
+
+                // get number of alive neighbours
+                int alive = getNeighbours(x, y, rowVal);
+                // ^ How costly is it to send array as parameter? Is it worth it for cleaner code?
+
+                // If currently alive
+                if (rowVal[x][y] == 0xFF) {
+                    // If number of alive neighbours isn't two or three, die. Else stay alive by default
+                    if (alive != 2 && alive != 3)
+                        newVal[x][y - 1] = 0x0;
                 }
-             }
-             // If currently alive
-             if (rowVal[x][y] == 0xFF) {
-                // If number of alive neighbours isn't two or three, die. Else stay alive by default
-                if (alive != 2 && alive != 3)
-                   newVal[x][y - 1] = 0x0;
-                else
-                   newVal[x][y - 1] = 0xFF;
-             }
-             // Else cell is currently dead: if three alive neighbours resurrect, else stay dead
-             else {
-                if (alive == 3)
-                   newVal[x][y - 1] = 0xFF;
-                else
-                   newVal[x][y - 1] = 0x0;
-             }
-          }
-       }
+                // Else cell is currently dead: if not exactly three alive neighbours stay dead
+                else if (alive != 3)
+                    newVal[x][y - 1] = 0x0;
+            }
+        }
 
-       // update processed rows for use in next iteration
-       for( int y = 0; y < ((IMHT / NWKS)); y++ ) {   // for every row excluding edge rows
-          for( int x = 0; x < IMWD; x++ ) {              // for each column
-              rowVal[x][y + 1] = newVal[x][y];            // update non-overlapping rows
-          }
-       }
+        // Update processed rows for use in next iteration
+        for( int y = 0; y < load; y++ ) {                  // for every row excluding edge rows
+            for( int x = 0; x < IMWD; x++ ) {              // for each column
+                rowVal[x][y + 1] = newVal[x][y];           // update non-overlapping rows
+            }
+        }
 
-
-       // Get new ghost row states so that next iteration can be calculated
-       // as well as send ghost row states for other workers to use
-       // e.g:
-       //    w0 <--- w1      w2 <--- w3
-       //    w0      w1 ---> w2      w3 --->
-       //    w0 ---> w1      w2 ---> w3
-       //    w0      w1 <--- w2      w3 <---
-
+       /*
+        Update ghost row states for next iteration by communicating with other workers
+        as well as send ghost row states for other workers to use
+        e.g: four workers:
+           w0 <--- w1      w2 <--- w3
+           w0      w1 ---> w2      w3 --->
+           w0 ---> w1      w2 ---> w3
+           w0      w1 <--- w2      w3 <---
+       */
 
        if (id % 2 == 1) { // odd numbered workers
-           for ( int x = 0; x < IMWD; x++ ) {            // 1. send to left
+           // 1. send to left
+           for ( int x = 0; x < IMWD; x++ )
                wLeft <: newVal[x][0];
-           }
-           for ( int x = 0; x < IMWD; x++ ) {            // 2. send to right
+           // 2. send to right
+           for ( int x = 0; x < IMWD; x++ )
                wRight <: newVal[x][load - 1];
-           }
-           for ( int x = 0; x < IMWD; x++ ) {            // 3. receive from left
+           // 3. receive from left
+           for ( int x = 0; x < IMWD; x++ )
                wLeft :> rowVal[x][0];
-           }
-           for ( int x = 0; x < IMWD; x++ ) {            // 4. receive from right
+           // 4. receive from right
+           for ( int x = 0; x < IMWD; x++ )
                wRight :> rowVal[x][load + 1];
-           }
        }
        else {             // even numbered workers
-           for ( int x = 0; x < IMWD; x++ ) {            // 4. receive from right
+           // 1. receive from right
+           for ( int x = 0; x < IMWD; x++ )
                wRight :> rowVal[x][load + 1];
-           }
-           for ( int x = 0; x < IMWD; x++ ) {            // 2. receive from left
+           // 2. receive from left
+           for ( int x = 0; x < IMWD; x++ )
                wLeft :> rowVal[x][0];
-           }
-           for ( int x = 0; x < IMWD; x++ ) {            // 3. send to right
+           // 3. send to right
+           for ( int x = 0; x < IMWD; x++ )
                wRight <: newVal[x][load - 1];
-           }
-           for ( int x = 0; x < IMWD; x++ ) {            // 4. send to left
+           // 4. send to left
+           for ( int x = 0; x < IMWD; x++ )
                wLeft <: newVal[x][0];
-          }
        }
-
-//       if (id == 2) {
-//          printf("Worker %d finishing iteration %d with arrays:\n", id, i);
-//           for( int y = 0; y < load + 2; y++ ) {
-//             for( int x = 0; x < IMWD; x++ ) {
-//               printf( "-%4.1d ", rowVal[x][y] ); //show image values
-//             }
-//             printf( "\n" );
-//           }
-//       }
     }
 
-    printf("Worker %d iterations complete\n", id);
+    //printf("Worker %d iterations complete\n", id);
 
     // Send new cell states to farmer for combining
-    for( int y = 0; y < (IMHT / NWKS); y++ ) {   // for every row excluding edge rows
-       for( int x = 0; x < IMWD; x++ ) {         // for each column
-          fromFarmer <: newVal[x][y];            // send to farmer (distributer)
-       }
+    for( int y = 0; y < load; y++ ) {             // for every row excluding edge rows
+        for( int x = 0; x < IMWD; x++ ) {         // for each column
+            fromFarmer <: newVal[x][y];           // send to farmer (distributer)
+        }
     }
-    printf("Worker %d passed cells to distributer\n", id);
+    //printf("Worker %d passed cells to distributer\n", id);
 }
 
 /////////////////////////////////////////////////////////////////////////////////////////

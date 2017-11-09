@@ -491,6 +491,25 @@
     </values>
   </arg>
 </fCall>
+<fCall name="printf" global="true" numArgs="2">
+  <arg num="0">
+    <values>
+      <value type="unknown"/>
+    </values>
+  </arg>
+  <arg num="1">
+    <values>
+      <value type="unknown"/>
+    </values>
+  </arg>
+</fCall>
+<fCall name="printf" global="true" numArgs="1">
+  <arg num="0">
+    <values>
+      <value type="unknown"/>
+    </values>
+  </arg>
+</fCall>
 <fCall name="_closeinpgm" global="true" numArgs="0">
 </fCall>
 <fCall name="printf" global="true" numArgs="1">
@@ -643,18 +662,6 @@
   <arg num="0">
     <values>
       <value type="unknown"/>
-    </values>
-  </arg>
-</fCall>
-<fCall name="_writeoutline" global="true" numArgs="2">
-  <arg num="0">
-    <values>
-      <value type="unknown"/>
-    </values>
-  </arg>
-  <arg num="1">
-    <values>
-      <value type="intval"><intval isSigned="true" val="16"/></value>
     </values>
   </arg>
 </fCall>

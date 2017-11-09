@@ -60,9 +60,9 @@ void DataInStream(char infname[], chanend c_out)
     _readinline( line, IMWD );
     for( int x = 0; x < IMWD; x++ ) {
       c_out <: line[ x ];
-      //printf( "-%4.1d ", line[ x ] ); //show image values
+      printf( "-%4.1d ", line[ x ] ); //show image values
     }
-    //printf( "\n" );
+    printf( "\n" );
   }
 
   //Close PGM image file
@@ -154,9 +154,17 @@ void worker(int id, chanend fromFarmer, chanend wLeft, chanend wRight)
       }
    }
 
-    while(i < 10){
+    while (i < 10) {
        i++;
-       //printf("iteration: %d\n", i);
+//       if (id == 2) {
+//           printf("Worker %d starting iteration %d with arrays:\n", id, i);
+//            for( int y = 0; y < load + 2; y++ ) {
+//              for( int x = 0; x < IMWD; x++ ) {
+//                printf( "-%4.1d ", rowVal[x][y] ); //show image values
+//              }
+//              printf( "\n" );
+//            }
+//       }
 
        // Look at neighbouring cells and work out the next state of each cell
        for( int y = 1; y < (IMHT / NWKS) + 1; y++ ) {   // for every row excluding edge rows
@@ -215,43 +223,44 @@ void worker(int id, chanend fromFarmer, chanend wLeft, chanend wRight)
        if (id % 2 == 1) { // odd numbered workers
            for ( int x = 0; x < IMWD; x++ ) {            // 1. send to left
                wLeft <: newVal[x][0];
-               wLeft <: newVal[x][load - 1];
            }
            for ( int x = 0; x < IMWD; x++ ) {            // 2. send to right
-               wRight <: newVal[x][0];
                wRight <: newVal[x][load - 1];
            }
            for ( int x = 0; x < IMWD; x++ ) {            // 3. receive from left
                wLeft :> rowVal[x][0];
-               wLeft :> rowVal[x][load + 1];
            }
            for ( int x = 0; x < IMWD; x++ ) {            // 4. receive from right
-               wRight :> rowVal[x][0];
                wRight :> rowVal[x][load + 1];
            }
        }
        else {             // even numbered workers
            for ( int x = 0; x < IMWD; x++ ) {            // 4. receive from right
-               wRight :> rowVal[x][0];
                wRight :> rowVal[x][load + 1];
            }
            for ( int x = 0; x < IMWD; x++ ) {            // 2. receive from left
                wLeft :> rowVal[x][0];
-               wLeft :> rowVal[x][load + 1];
            }
            for ( int x = 0; x < IMWD; x++ ) {            // 3. send to right
-               wRight <: newVal[x][0];
                wRight <: newVal[x][load - 1];
            }
            for ( int x = 0; x < IMWD; x++ ) {            // 4. send to left
                wLeft <: newVal[x][0];
-               wLeft <: newVal[x][load - 1];
           }
        }
+
+//       if (id == 2) {
+//          printf("Worker %d finishing iteration %d with arrays:\n", id, i);
+//           for( int y = 0; y < load + 2; y++ ) {
+//             for( int x = 0; x < IMWD; x++ ) {
+//               printf( "-%4.1d ", rowVal[x][y] ); //show image values
+//             }
+//             printf( "\n" );
+//           }
+//       }
     }
 
     printf("Worker %d iterations complete\n", id);
-
 
     // Send new cell states to farmer for combining
     for( int y = 0; y < (IMHT / NWKS); y++ ) {   // for every row excluding edge rows
@@ -279,34 +288,17 @@ void DataOutStream(char outfname[], chanend c_in)
     printf( "DataOutStream: Error opening %s\n.", outfname );
     return;
   }
-  //iteration counter
-  int i = 0;
 
-  while (i < 100){
-        //Compile each line of the image and write the image line-by-line
-        if (i == 99) {
-            for( int y = 0; y < IMHT; y++ ) {
-              for( int x = 0; x < IMWD; x++ ) {
-                c_in :> line[ x ];
-                printf( "-%4.1d ", line[ x ] ); //show image values
-              }
-              printf( "\n" );
-              _writeoutline( line, IMWD );
-              //printf( "DataOutStream: Line written...\n" );
-            }
-            i++;
-        }
-        else{
-            for( int y = 0; y < IMHT; y++ ) {
-                for( int x = 0; x < IMWD; x++ ) {
-                  c_in :> line[ x ];
-                }
-                _writeoutline( line, IMWD );
-                //printf( "DataOutStream: Line written...\n" );
-            }
-            i++;
-        }
-    }
+ //Compile each line of the image and write the image line-by-line
+ for( int y = 0; y < IMHT; y++ ) {
+   for( int x = 0; x < IMWD; x++ ) {
+     c_in :> line[ x ];
+     printf( "-%4.1d ", line[ x ] ); //show image values
+   }
+   printf( "\n" );
+   _writeoutline( line, IMWD );
+   //printf( "DataOutStream: Line written...\n" );
+ }
 
   //Close the PGM image
   _closeoutpgm();

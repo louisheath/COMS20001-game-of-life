@@ -1,3 +1,0 @@
-<preCompilationAnalysis file="/Users/louis/COMS20001-game-of-life/rows/lib_xassert/src/xassert.xc">
-<fDef name="xassert_msg" global="true" noreturn="false" doNotSpecialize="false" numParams="1"/>
-</preCompilationAnalysis>

@@ -96,10 +96,10 @@ void distributor(chanend c_in, chanend c_out, chanend fromAcc, chanend worker[NW
         }
     }
 
-    // Divide work between workers
-    for(int w = 0; w < NWKS; w++) {                         // for each of the workers
-        for(int y = 0; y < ((IMHT / NWKS) + 2); y++ ) {     // for the portion of rows to be given to the worker
-            for( int x = 0; x < IMWD; x++ ) {               // for every column
+    // Divide world between workers
+    for( int w = 0; w < NWKS; w++ ) {                        // for each of the workers
+        for( int y = 0; y < ((IMHT / NWKS) + 2); y++ ) {     // for the portion of rows to be given to the worker
+            for( int x = 0; x < IMWD; x++ ) {                // for every column
                 // send cell values to the worker, who will combine them into a new array
                 worker[w] <: val[x][mod(IMHT, (y + (w*(IMHT / NWKS)) - 1))];
             }
@@ -113,11 +113,17 @@ void distributor(chanend c_in, chanend c_out, chanend fromAcc, chanend worker[NW
             case fromAcc :> int tilted: {// tilted
                 if (tilted) {
                     printf("dist knows tilted\n");
-                    for (int w = 0; w < NWKS; w++ ) worker[w] <: tilted;
+                    for (int w = 0; w < NWKS; w++ ) {
+                        worker[w] <: tilted;
+                        printf("Told worker %d tilted\n", w);
+                    }
                 }
                 else if (!tilted) {
                     printf("dist knows untilted\n");
-                    for (int w = 0; w < NWKS; w++ ) worker[w] <: tilted;
+                    for (int w = 0; w < NWKS; w++ ) {
+                        worker[w] <: tilted;
+                        printf("Told worker %d untilted\n", w);
+                    }
                 }
                 break;
             }
@@ -194,23 +200,27 @@ void worker(int id, chanend fromFarmer, chanend wLeft, chanend wRight)
     while (!ended) {
         // check to see if game should be paused
         select {
-            case fromFarmer :> int paused: {// tilted
-                if (paused) {
-                    printf("w%d knows tilted\n", id);
-                    if (id == 0) printf("Paused at iteration %d\n", i);
+            case fromFarmer :> paused: {// tilted
+                if (paused == 1) {
+                    printf("%d knows tilted\n", id);
                 }
-                else if (!paused) {
-                    printf("w%d knows untilted\n", id);
+                else if (paused == 0) {
+                    printf("%d resuming\n", id);
                 }
                 break;
             }
+//            default : {
+//                printf("%d defaulted\n", id);
+//                break;
+//            }
+            // when using default, only worker 0 prints
         }
-
+        printf("%d\n", paused);
         if (!paused) {
             i++;
 
             // Look at neighbouring cells and work out the next state of each cell
-            for( int y = 1; y < load + 1; y++ ) {   // for every row excluding edge rows
+            for( int y = 1; y < load + 1; y++ ) {            // for every row excluding edge rows
                 for( int x = 0; x < IMWD; x++ ) {            // for every column
                     // set cell to alive by default
                     newVal[x][y - 1] = 0xFF;
@@ -374,7 +384,7 @@ void orientation( client interface i2c_master_if i2c, chanend toDist) {
                 printf("tilted\n");
             }
         }
-        else if (x<=30) {
+        else if (x<20) {
             tilted = 0;
             toDist <: tilted;
             printf("untilted\n");

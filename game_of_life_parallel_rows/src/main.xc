@@ -112,17 +112,17 @@ void distributor(chanend c_in, chanend c_out, chanend fromAcc, chanend worker[NW
         select {
             case fromAcc :> int tilted: {// tilted
                 if (tilted) {
-                    printf("dist knows tilted\n");
+                    //printf("dist knows tilted\n");
                     for (int w = 0; w < NWKS; w++ ) {
                         worker[w] <: tilted;
-                        printf("Told worker %d tilted\n", w);
+                        //printf("Told worker %d tilted\n", w);
                     }
                 }
                 else if (!tilted) {
-                    printf("dist knows untilted\n");
+                    //printf("dist knows untilted\n");
                     for (int w = 0; w < NWKS; w++ ) {
                         worker[w] <: tilted;
-                        printf("Told worker %d untilted\n", w);
+                        //printf("Told worker %d untilted\n", w);
                     }
                 }
                 break;
@@ -201,24 +201,19 @@ void worker(int id, chanend fromFarmer, chanend wLeft, chanend wRight)
         // check to see if game should be paused
         select {
             case fromFarmer :> paused: {// tilted
-                if (paused == 1) {
-                    printf("%d knows tilted\n", id);
-                }
-                else if (paused == 0) {
-                    printf("%d resuming\n", id);
-                }
+//                if (paused == 1) {
+//                    printf("%d knows tilted\n", id);
+//                }
+//                else if (paused == 0) {
+//                    printf("%d resuming\n", id);
+//                }
                 break;
             }
-//            default : {
-//                printf("%d defaulted\n", id);
-//                break;
-//            }
             // when using default, only worker 0 prints
         }
-        printf("%d\n", paused);
+        //printf("%d\n", paused);
         if (!paused) {
             i++;
-
             // Look at neighbouring cells and work out the next state of each cell
             for( int y = 1; y < load + 1; y++ ) {            // for every row excluding edge rows
                 for( int x = 0; x < IMWD; x++ ) {            // for every column
@@ -380,15 +375,14 @@ void orientation( client interface i2c_master_if i2c, chanend toDist) {
         if (!tilted) {
             if (x>30) {
                 tilted = 1;
-                toDist <: tilted;
                 printf("tilted\n");
             }
         }
         else if (x<20) {
             tilted = 0;
-            toDist <: tilted;
             printf("untilted\n");
         }
+        toDist <: tilted;
     }
   }
 }

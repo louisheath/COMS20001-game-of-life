@@ -86,7 +86,7 @@ void distributor(chanend c_in, chanend c_out, chanend fromAcc, chanend worker[NW
     //Starting up and wait for tilting of the xCore-200 Explorer
     printf( "ProcessImage: Start, size = %dx%d\n", IMHT, IMWD );
     printf( "Waiting for Board Tilt...\n" );
-    fromAcc :> int value;
+    //fromAcc :> int value;
 
     printf( "Processing...\n" );
 
@@ -96,36 +96,12 @@ void distributor(chanend c_in, chanend c_out, chanend fromAcc, chanend worker[NW
         }
     }
 
-    // Divide world between workers
-    for( int w = 0; w < NWKS; w++ ) {                        // for each of the workers
-        for( int y = 0; y < ((IMHT / NWKS) + 2); y++ ) {     // for the portion of rows to be given to the worker
-            for( int x = 0; x < IMWD; x++ ) {                // for every column
+    // Divide work between workers
+    for(int w = 0; w < NWKS; w++) {                         // for each of the workers
+        for(int y = 0; y < ((IMHT / NWKS) + 2); y++ ) {     // for the portion of rows to be given to the worker
+            for( int x = 0; x < IMWD; x++ ) {               // for every column
                 // send cell values to the worker, who will combine them into a new array
                 worker[w] <: val[x][mod(IMHT, (y + (w*(IMHT / NWKS)) - 1))];
-            }
-        }
-    }
-
-    // get tilt status from orientation sensor, pass it to workers
-    int running = 1;
-    while (running) {
-        select {
-            case fromAcc :> int tilted: {// tilted
-                if (tilted) {
-                    //printf("dist knows tilted\n");
-                    for (int w = 0; w < NWKS; w++ ) {
-                        worker[w] <: tilted;
-                        //printf("Told worker %d tilted\n", w);
-                    }
-                }
-                else if (!tilted) {
-                    //printf("dist knows untilted\n");
-                    for (int w = 0; w < NWKS; w++ ) {
-                        worker[w] <: tilted;
-                        //printf("Told worker %d untilted\n", w);
-                    }
-                }
-                break;
             }
         }
     }
@@ -184,10 +160,6 @@ void worker(int id, chanend fromFarmer, chanend wLeft, chanend wRight)
     uchar newVal[IMWD][(IMHT / NWKS)];
     // iteration counter
     int i = 0;
-    // board tilt pause
-    int paused = 0;
-    // end game
-    int ended = 0;
 
     // contruct array to work on
     for( int y = 0; y < (load + 2); y++ ) {     // for every row to be input
@@ -197,91 +169,76 @@ void worker(int id, chanend fromFarmer, chanend wLeft, chanend wRight)
         }
     }
 
-    while (!ended) {
-        // check to see if game should be paused
-        select {
-            case fromFarmer :> paused: {// tilted
-//                if (paused == 1) {
-//                    printf("%d knows tilted\n", id);
-//                }
-//                else if (paused == 0) {
-//                    printf("%d resuming\n", id);
-//                }
-                break;
-            }
-            // when using default, only worker 0 prints
-        }
-        //printf("%d\n", paused);
-        if (!paused) {
-            i++;
-            // Look at neighbouring cells and work out the next state of each cell
-            for( int y = 1; y < load + 1; y++ ) {            // for every row excluding edge rows
-                for( int x = 0; x < IMWD; x++ ) {            // for every column
-                    // set cell to alive by default
-                    newVal[x][y - 1] = 0xFF;
+    while (i < 100) {
+        i++;
 
-                    // get number of alive neighbours
-                    int alive = getNeighbours(x, y, rowVal);
-                    // ^ How costly is it to send array as parameter? Is it worth it for cleaner code?
+        // Look at neighbouring cells and work out the next state of each cell
+        for( int y = 1; y < load + 1; y++ ) {   // for every row excluding edge rows
+            for( int x = 0; x < IMWD; x++ ) {            // for every column
+                // set cell to alive by default
+                newVal[x][y - 1] = 0xFF;
 
-                    // If currently alive
-                    if (rowVal[x][y] == 0xFF) {
-                        // If number of alive neighbours isn't two or three, die. Else stay alive by default
-                        if (alive != 2 && alive != 3)
-                            newVal[x][y - 1] = 0x0;
-                    }
-                    // Else cell is currently dead: if not exactly three alive neighbours stay dead
-                    else if (alive != 3)
+                // get number of alive neighbours
+                int alive = getNeighbours(x, y, rowVal);
+                // ^ How costly is it to send array as parameter? Is it worth it for cleaner code?
+
+                // If currently alive
+                if (rowVal[x][y] == 0xFF) {
+                    // If number of alive neighbours isn't two or three, die. Else stay alive by default
+                    if (alive != 2 && alive != 3)
                         newVal[x][y - 1] = 0x0;
                 }
+                // Else cell is currently dead: if not exactly three alive neighbours stay dead
+                else if (alive != 3)
+                    newVal[x][y - 1] = 0x0;
             }
-
-            // Update processed rows for use in next iteration
-            for( int y = 0; y < load; y++ ) {                  // for every row excluding edge rows
-                for( int x = 0; x < IMWD; x++ ) {              // for each column
-                    rowVal[x][y + 1] = newVal[x][y];           // update non-overlapping rows
-                }
-            }
-
-           /*
-            Update ghost row states for next iteration by communicating with other workers
-            as well as send ghost row states for other workers to use
-            e.g: four workers:
-               w0 <--- w1      w2 <--- w3
-               w0      w1 ---> w2      w3 --->
-               w0 ---> w1      w2 ---> w3
-               w0      w1 <--- w2      w3 <---
-           */
-
-           if (id % 2 == 1) { // odd numbered workers
-               // 1. send to left
-               for ( int x = 0; x < IMWD; x++ )
-                   wLeft <: newVal[x][0];
-               // 2. send to right
-               for ( int x = 0; x < IMWD; x++ )
-                   wRight <: newVal[x][load - 1];
-               // 3. receive from left
-               for ( int x = 0; x < IMWD; x++ )
-                   wLeft :> rowVal[x][0];
-               // 4. receive from right
-               for ( int x = 0; x < IMWD; x++ )
-                   wRight :> rowVal[x][load + 1];
-           }
-           else {             // even numbered workers
-               // 1. receive from right
-               for ( int x = 0; x < IMWD; x++ )
-                   wRight :> rowVal[x][load + 1];
-               // 2. receive from left
-               for ( int x = 0; x < IMWD; x++ )
-                   wLeft :> rowVal[x][0];
-               // 3. send to right
-               for ( int x = 0; x < IMWD; x++ )
-                   wRight <: newVal[x][load - 1];
-               // 4. send to left
-               for ( int x = 0; x < IMWD; x++ )
-                   wLeft <: newVal[x][0];
-           }
         }
+
+        // Update processed rows for use in next iteration
+        for( int y = 0; y < load; y++ ) {                  // for every row excluding edge rows
+            for( int x = 0; x < IMWD; x++ ) {              // for each column
+                rowVal[x][y + 1] = newVal[x][y];           // update non-overlapping rows
+            }
+        }
+
+       /*
+        Update ghost row states for next iteration by communicating with other workers
+        as well as send ghost row states for other workers to use
+        e.g: four workers:
+           w0 <--- w1      w2 <--- w3
+           w0      w1 ---> w2      w3 --->
+           w0 ---> w1      w2 ---> w3
+           w0      w1 <--- w2      w3 <---
+       */
+
+       if (id % 2 == 1) { // odd numbered workers
+           // 1. send to left
+           for ( int x = 0; x < IMWD; x++ )
+               wLeft <: newVal[x][0];
+           // 2. send to right
+           for ( int x = 0; x < IMWD; x++ )
+               wRight <: newVal[x][load - 1];
+           // 3. receive from left
+           for ( int x = 0; x < IMWD; x++ )
+               wLeft :> rowVal[x][0];
+           // 4. receive from right
+           for ( int x = 0; x < IMWD; x++ )
+               wRight :> rowVal[x][load + 1];
+       }
+       else {             // even numbered workers
+           // 1. receive from right
+           for ( int x = 0; x < IMWD; x++ )
+               wRight :> rowVal[x][load + 1];
+           // 2. receive from left
+           for ( int x = 0; x < IMWD; x++ )
+               wLeft :> rowVal[x][0];
+           // 3. send to right
+           for ( int x = 0; x < IMWD; x++ )
+               wRight <: newVal[x][load - 1];
+           // 4. send to left
+           for ( int x = 0; x < IMWD; x++ )
+               wLeft <: newVal[x][0];
+       }
     }
 
     //printf("Worker %d iterations complete\n", id);
@@ -338,7 +295,6 @@ void DataOutStream(char outfname[], chanend c_in)
 void orientation( client interface i2c_master_if i2c, chanend toDist) {
   i2c_regop_res_t result;
   char status_data = 0;
-  int initiated = 0;
   int tilted = 0;
 
   // Configure FXOS8700EQ
@@ -365,24 +321,11 @@ void orientation( client interface i2c_master_if i2c, chanend toDist) {
     int x = read_acceleration(i2c, FXOS8700EQ_OUT_X_MSB);
 
     //send signal to distributor after first tilt
-    if (!initiated) {
+    if (!tilted) {
       if (x>30) {
-        toDist <: 1;
-        initiated = 1;
+        tilted = 1 - tilted;
+        //toDist <: 1;
       }
-    }
-    else {
-        if (!tilted) {
-            if (x>30) {
-                tilted = 1;
-                printf("tilted\n");
-            }
-        }
-        else if (x<20) {
-            tilted = 0;
-            printf("untilted\n");
-        }
-        toDist <: tilted;
     }
   }
 }

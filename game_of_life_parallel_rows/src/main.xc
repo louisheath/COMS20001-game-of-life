@@ -8,8 +8,8 @@
 #include "pgmIO.h"
 #include "i2c.h"
 
-#define  IMHT 16                  //image height
-#define  IMWD 16                  //image width
+#define  IMHT 64                  //image height
+#define  IMWD 64                  //image width
 #define  NWKS 4                   //number of workers
 
 typedef unsigned char uchar;      //using uchar as shorthand
@@ -37,6 +37,18 @@ int mod(int n,int x) {
   return x;
 }
 
+uchar pack(int index, uchar byte, uchar c) {
+    if (c == 0x0) {
+        byte = byte | (0 << index);
+        index++;
+    }
+    else if (c == 0xFF) {
+        byte = byte | (1 << index);
+        index++;
+    }
+    return byte;
+}
+
 /////////////////////////////////////////////////////////////////////////////////////////
 //
 // Read Image from PGM file from path infname[] to channel c_out
@@ -44,10 +56,18 @@ int mod(int n,int x) {
 /////////////////////////////////////////////////////////////////////////////////////////
 void DataInStream(char infname[], chanend c_out)
 {
-  int res;
-  uchar line[ IMWD ];
-  printf( "DataInStream: Start...\n" );
+  //set up timer arguments
+  timer t;
+  uint32_t start;
+  uint32_t now;
+  uint32_t end;
 
+  int res;
+  int i = 0; //count 8 transfers into an array for packing
+  uchar line[ IMWD ];
+
+  printf( "DataInStream: Start...\n");
+  t :> start;
   //Open PGM file
   res = _openinpgm( infname, IMWD, IMHT );
   if( res ) {
@@ -58,16 +78,18 @@ void DataInStream(char infname[], chanend c_out)
   //Read image line-by-line and send byte by byte to channel c_out
   for( int y = 0; y < IMHT; y++ ) {
     _readinline( line, IMWD );
+
     for( int x = 0; x < IMWD; x++ ) {
       c_out <: line[ x ];
-      printf( "-%4.1d ", line[ x ] ); //show image values
+      //printf( "-%4.1d ", line[ x ] ); //show image values
     }
-    printf( "\n" );
+    //printf( "\n" );
   }
 
   //Close PGM image file
   _closeinpgm();
-  printf( "DataInStream: Done...\n" );
+  t :> end;
+  printf( "DataInStream: Complete in %d\n", (end-start)/100000000);
   return;
 }
 
@@ -86,7 +108,7 @@ void distributor(chanend c_in, chanend c_out, chanend fromAcc, chanend worker[NW
     //Starting up and wait for tilting of the xCore-200 Explorer
     printf( "ProcessImage: Start, size = %dx%d\n", IMHT, IMWD );
     printf( "Waiting for Board Tilt...\n" );
-    //fromAcc :> int value;
+    fromAcc :> int value;
 
     printf( "Processing...\n" );
 
@@ -324,7 +346,7 @@ void orientation( client interface i2c_master_if i2c, chanend toDist) {
     if (!tilted) {
       if (x>30) {
         tilted = 1 - tilted;
-        //toDist <: 1;
+        toDist <: 1;
       }
     }
   }
@@ -336,6 +358,8 @@ void orientation( client interface i2c_master_if i2c, chanend toDist) {
 //
 /////////////////////////////////////////////////////////////////////////////////////////
 int main(void) {
+
+
 
   i2c_master_if i2c[1];                          // interface to orientation sensor
 
@@ -349,8 +373,8 @@ int main(void) {
   par {
     on tile[0] : i2c_master(i2c, 1, p_scl, p_sda, 10);              //server thread providing orientation data
     on tile[0] : orientation(i2c[0],c_control);                     //client thread reading orientation data
-    on tile[0] : DataInStream("test.pgm", c_inIO);                  //thread to read in a PGM image
-    on tile[0] : DataOutStream("testout.pgm", c_outIO);             //thread to write out a PGM image
+    on tile[0] : DataInStream("64x64.pgm", c_inIO);                  //thread to read in a PGM image
+    on tile[0] : DataOutStream("64x64out.pgm", c_outIO);             //thread to write out a PGM image
     on tile[0] : distributor(c_inIO, c_outIO, c_control, WtoD);     //thread to coordinate work on image
     //initialise 4 workers
     on tile[1] : worker(0, WtoD[0], WtoW[3], WtoW[0]);

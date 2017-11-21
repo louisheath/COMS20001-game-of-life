@@ -663,14 +663,16 @@
 <fInfo name="mod" global="true" specialize="false" noreturn="false" doNotSpecialize="false" numParams="2">
   <arg num="0" specialize="false">
     <values>
-      <value type="unknown"/>
-      <value type="intval"><intval isSigned="true" val="64"/></value>
+      <value type="intval"><intval isSigned="true" val="2"/></value>
+      <value type="intval"><intval isSigned="true" val="8"/></value>
+      <value type="intval"><intval isSigned="true" val="512"/></value>
     </values>
   </arg>
   <arg num="1" specialize="false">
     <values>
       <value type="unknown"/>
-      <value type="intval"><intval isSigned="true" val="8"/></value>
+      <value type="intval"><intval isSigned="true" val="5"/></value>
+      <value type="intval"><intval isSigned="true" val="17"/></value>
     </values>
   </arg>
 </fInfo>
@@ -710,6 +712,7 @@
   <arg num="2" specialize="false">
     <values>
       <value type="unknown"/>
+      <value type="intval"><intval isSigned="true" val="0"/></value>
       <value type="intval"><intval isSigned="true" val="255"/></value>
     </values>
   </arg>
@@ -868,6 +871,7 @@
 <fInfo name="unpack" global="true" specialize="false" noreturn="false" doNotSpecialize="false" numParams="2">
   <arg num="0" specialize="false">
     <values>
+      <value type="unknown"/>
       <value type="intval"><intval isSigned="true" val="0"/></value>
       <value type="intval"><intval isSigned="true" val="1"/></value>
       <value type="intval"><intval isSigned="true" val="2"/></value>

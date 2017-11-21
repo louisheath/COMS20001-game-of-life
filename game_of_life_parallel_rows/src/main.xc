@@ -9,9 +9,10 @@
 #include "i2c.h"
 #include <assert.h>
 
-#define  IMHT 64                  //image height
-#define  IMWD 64                  //image width
+#define  IMHT 16                  //image height
+#define  IMWD 16                  //image width
 #define  NWKS 4                   //number of workers
+#define  NPKT IMWD/8              //number of packets in a row
 
 typedef unsigned char uchar;      //using uchar as shorthand
 
@@ -31,7 +32,7 @@ on tile[0]:port p_sda = XS1_PORT_1F;
 
 void tests();
 
-// modulo function that works with negatives
+// modulo function that works with negatives. return (x mod n)
 int mod(int n,int x) {
   while (x < 0  || x > (n-1)) {
     if (x < 0) x += n;
@@ -87,13 +88,15 @@ void DataInStream(char infname[], chanend c_out)
     _readinline( line, IMWD );
 
     uchar packet = 0x00;
-    for ( int p = 0; p < IMWD/8; p++) {         // for every packet we can fit in the row
+    for ( int p = 0; p < NPKT; p++) {         // for every packet we can fit in the row
         for ( int x = 0; x < 8; x++) {          // for each of the eight bits to be packed
-            pack(x, packet, line[x + p*8]);
+            packet = pack(x, packet, line[x + p*8]);
+            //printf( "-%4.1d ", line[p*8 + x] ); //show image values
         }
         c_out <: packet;
         packet = 0x00;
     }
+    //printf("\n");
   }
 
   //Close PGM image file
@@ -115,7 +118,7 @@ void distributor(chanend c_in, chanend c_out, chanend fromAcc, chanend worker[NW
 {
     tests();
 
-    uchar val[IMWD/8][IMHT];    // World state
+    uchar val[NPKT][IMHT];    // World state
 
     //Starting up and wait for tilting of the xCore-200 Explorer
     printf( "ProcessImage: Start, size = %dx%d\n", IMHT, IMWD );
@@ -124,69 +127,79 @@ void distributor(chanend c_in, chanend c_out, chanend fromAcc, chanend worker[NW
 
     printf( "Processing...\n" );
 
-    for(int y = 0; y < IMHT; y++ ) {       // Read every pixel into world array
-        for( int x = 0; x < IMWD/8; x++ ) {
-           c_in :> val[x][y];
+    for(int y = 0; y < IMHT; y++ ) {       // Read every packet into world array
+        for( int p = 0; p < NPKT; p++ ) {
+           c_in :> val[p][y];
         }
     }
+
+//    // TEST: write out packed world
+//      //Compile each line of the image and write the image line-by-line
+//      for( int y = 0; y < IMHT; y++ ) {
+//        for( int p = 0; p < NPKT; p++ ) {
+//          uchar packet = val[p][y];
+//
+//          // unpack each bit and add to output line
+//          for ( int x = 0; x < 8; x++ ) {
+//              printf( "-%4.1d ", unpack(x, packet) ); //show image values
+//          }
+//        }
+//        printf( "\n" );
+//      }
 
     // Divide work between workers
     for(int w = 0; w < NWKS; w++) {                         // for each of the workers
         for(int y = 0; y < ((IMHT / NWKS) + 2); y++ ) {     // for the portion of rows to be given to the worker
-            for( int x = 0; x < IMWD/8; x++ ) {               // for every column
+            for( int p = 0; p < NPKT; p++ ) {               // for every packet
                 // send cell values to the worker, who will combine them into a new array
-                worker[w] <: val[x][mod(IMHT, (y + (w*(IMHT / NWKS)) - 1))];
+                worker[w] <: val[p][mod(IMHT, (y + (w*(IMHT / NWKS)) - 1))];
             }
         }
     }
 
     // Receive processed cells from workers
-    for(int w = 0; w < NWKS; w++) {                  // for each of the workers
+    for(int w = 0; w < NWKS; w++) {                   // for each of the workers
         for(int y = 0; y < ((IMHT / NWKS)); y++ ) {   // for each row that will be used in new array (edge rows not returned)
-            for( int x = 0; x < IMWD; x++ ) {          // for every column
+            for( int p = 0; p < NPKT; p++ ) {         // for every packet
                // receive cell values from worker and place into new world array
-               worker[w] :> val[x][y + (w*(IMHT / NWKS))];
+               worker[w] :> val[p][y + (w*(IMHT / NWKS))];
             }
         }
     }
 
     // Send processed data to DataOutStream
     for(int y = 0; y < IMHT; y++ ) {
-        for( int x = 0; x < IMWD; x++ ) { // for every cell
-            c_out <: val[x][y];          // send cell information to DataOutStream
+        for( int p = 0; p < NPKT; p++ ) { // for every packet
+            c_out <: val[p][y];           // send cell information to DataOutStream
         }
     }
 
     //printf( "\nOne processing round completed...\n" );
 }
 
-int getNeighbours(int x, int y, uchar rowVal[IMWD/8][IMHT / NWKS + 2]) {
-
-    // e.g. 26th bit is going to be the 3rd bit of the 4th packet
-    //      in this case b = 3, p = 4
-    int b = mod(x, 8);
-    int p = x / 8;
-
+int getNeighbours(int x, int y, uchar rowVal[NPKT][IMHT / NWKS + 2]) {
     // variables used in finding neighbours
     int xRight = mod(IMWD, x+1);
     int xLeft = mod(IMWD, x-1);
 
     // coordinates for neighbours
     int nCoords[8][2] = {
-            {xLeft, y + 1}, {x, y + 1}, {xRight, y + 1},
+            {xLeft, y - 1}, {x, y - 1}, {xRight, y - 1},
             {xLeft, y},                 {xRight, y},
-            {xLeft, y - 1}, {x, y - 1}, {xRight, y - 1}
+            {xLeft, y + 1}, {x, y + 1}, {xRight, y + 1}
     };
 
     // store states of neighbours in array
-    int neighbours[8] = {1,1,1,1,1,1,1,1};
+    int neighbours[8];
 
-    int nB, nP;                     // integers to store packet# and index within that packet of each neighbours
+    // e.g. 26th bit is going to be the 3rd bit of the 4th packet
+    //      in this case b = 3, p = 4
+    int b, p;
     for (int n = 0; n < 8; n++) {   // for each neighbour
-        nB = mod(nCoords[n][0], 8);
-        nP = nCoords[n][0] / 8;
+        b = mod(8, nCoords[n][0]);
+        p = nCoords[n][0] / 8;
 
-        neighbours[n] = unpack(nB, rowVal[nP][nCoords[n][1]]);
+        neighbours[n] = unpack(b, rowVal[p][nCoords[n][1]]);
     }
 
     // count number of alive neighbours
@@ -196,7 +209,6 @@ int getNeighbours(int x, int y, uchar rowVal[IMWD/8][IMHT / NWKS + 2]) {
     }
     return alive;
 }
-
 
 /////////////////////////////////////////////////////////////////////////////////////////
 //
@@ -208,15 +220,15 @@ void worker(int id, chanend fromFarmer, chanend wLeft, chanend wRight)
     // number of rows worker is processing (excluding ghost rows)
     int load = IMHT / NWKS;
     // array of rows worker will work on
-    uchar rowVal[IMWD/8][(IMHT / NWKS) + 2];
+    uchar rowVal[NPKT][(IMHT / NWKS) + 2];
     // array for output rows
-    uchar newVal[IMWD/8][(IMHT / NWKS)];
+    uchar newVal[NPKT][(IMHT / NWKS)];
     // iteration counter
     int i = 0;
 
     // contruct array to work on
     for( int y = 0; y < (load + 2); y++ ) {     // for every row to be input
-        for( int x = 0; x < IMWD/8; x++ ) {         // for every column
+        for( int x = 0; x < NPKT; x++ ) {         // for every column
             // read in rows cell by cell from distributer to be worked on
             fromFarmer :> rowVal[x][y];
         }
@@ -226,31 +238,33 @@ void worker(int id, chanend fromFarmer, chanend wLeft, chanend wRight)
         i++;
 
         // Look at neighbouring cells and work out the next state of each cell
-        for( int y = 1; y < load + 1; y++ ) {               // for every row excluding edge rows
-            for( int x = 0; x < IMWD/8; x++ ) {             // for every column
-                // set cell to alive by default
-                newVal[x][y - 1] = 0xFF;
+        for( int y = 1; y < load + 1; y++ ) {              // for every row excluding edge rows
+            for( int p = 0; p < NPKT; p++ ) {             // for every packet in the row
+                // packet for new cell values, start with all alive
+                uchar newP = 0xFF;
+                for ( int x = 0; x < 8; x++) {             // for every bit in the packet
 
-                // get number of alive neighbours
-                int alive = getNeighbours(x, y, rowVal);
-                // ^ How costly is it to send array as parameter? Is it worth it for cleaner code?
+                    // get number of alive neighbours
+                    int alive = getNeighbours(x + p*8, y, rowVal);
 
-                // If currently alive
-                if (rowVal[x][y] == 0xFF) {
-                    // If number of alive neighbours isn't two or three, die. Else stay alive by default
-                    if (alive != 2 && alive != 3)
-                        newVal[x][y - 1] = 0x0;
+                    // If currently alive
+                    if (unpack(x, rowVal[p][y]) == 1) {
+                        // If number of alive neighbours isn't two or three, die. Else stay alive by default
+                        if (alive != 2 && alive != 3)
+                            newP = pack(x, newP, 0x0);
+                    }
+                    // Else cell is currently dead: if not exactly three alive neighbours stay dead
+                    else if (alive != 3)
+                        newP = pack(x, newP, 0x0);
                 }
-                // Else cell is currently dead: if not exactly three alive neighbours stay dead
-                else if (alive != 3)
-                    newVal[x][y - 1] = 0x0;
+                newVal[p][y - 1] = newP;
             }
         }
 
         // Update processed rows for use in next iteration
         for( int y = 0; y < load; y++ ) {                  // for every row excluding edge rows
-            for( int x = 0; x < IMWD; x++ ) {              // for each column
-                rowVal[x][y + 1] = newVal[x][y];           // update non-overlapping rows
+            for( int p = 0; p < NPKT; p++ ) {            // for each packet
+                rowVal[p][y + 1] = newVal[p][y];           // update non-overlapping rows
             }
         }
 
@@ -266,43 +280,40 @@ void worker(int id, chanend fromFarmer, chanend wLeft, chanend wRight)
 
        if (id % 2 == 1) { // odd numbered workers
            // 1. send to left
-           for ( int x = 0; x < IMWD; x++ )
-               wLeft <: newVal[x][0];
+           for ( int p = 0; p < NPKT; p++ )
+               wLeft <: newVal[p][0];
            // 2. send to right
-           for ( int x = 0; x < IMWD; x++ )
-               wRight <: newVal[x][load - 1];
+           for ( int p = 0; p < NPKT; p++ )
+               wRight <: newVal[p][load - 1];
            // 3. receive from left
-           for ( int x = 0; x < IMWD; x++ )
-               wLeft :> rowVal[x][0];
+           for ( int p = 0; p < NPKT; p++ )
+               wLeft :> rowVal[p][0];
            // 4. receive from right
-           for ( int x = 0; x < IMWD; x++ )
-               wRight :> rowVal[x][load + 1];
+           for ( int p = 0; p < NPKT; p++ )
+               wRight :> rowVal[p][load + 1];
        }
        else {             // even numbered workers
            // 1. receive from right
-           for ( int x = 0; x < IMWD; x++ )
-               wRight :> rowVal[x][load + 1];
+           for ( int p = 0; p < NPKT; p++ )
+               wRight :> rowVal[p][load + 1];
            // 2. receive from left
-           for ( int x = 0; x < IMWD; x++ )
-               wLeft :> rowVal[x][0];
+           for ( int p = 0; p < NPKT; p++ )
+               wLeft :> rowVal[p][0];
            // 3. send to right
-           for ( int x = 0; x < IMWD; x++ )
-               wRight <: newVal[x][load - 1];
+           for ( int p = 0; p < NPKT; p++ )
+               wRight <: newVal[p][load - 1];
            // 4. send to left
-           for ( int x = 0; x < IMWD; x++ )
-               wLeft <: newVal[x][0];
+           for ( int p = 0; p < NPKT; p++ )
+               wLeft <: newVal[p][0];
        }
     }
 
-    //printf("Worker %d iterations complete\n", id);
-
     // Send new cell states to farmer for combining
     for( int y = 0; y < load; y++ ) {             // for every row excluding edge rows
-        for( int x = 0; x < IMWD; x++ ) {         // for each column
-            fromFarmer <: newVal[x][y];           // send to farmer (distributer)
+        for( int p = 0; p < NPKT; p++ ) {       // for each packet
+            fromFarmer <: newVal[p][y];           // send to farmer (distributer)
         }
     }
-    //printf("Worker %d passed cells to distributer\n", id);
 }
 
 /////////////////////////////////////////////////////////////////////////////////////////
@@ -325,11 +336,18 @@ void DataOutStream(char outfname[], chanend c_in)
 
  //Compile each line of the image and write the image line-by-line
  for( int y = 0; y < IMHT; y++ ) {
-   for( int x = 0; x < IMWD; x++ ) {
-     c_in :> line[ x ];
-     printf( "-%4.1d ", line[ x ] ); //show image values
+   for( int p = 0; p < NPKT; p++ ) {
+     uchar packet;
+     c_in :> packet;
+
+     // unpack each bit and add to output line
+     for ( int x = 0; x < 8; x++ ) {
+         line[p*8 + x] = unpack(x, packet);
+         printf( "-%4.1d ", line[p*8 + x] ); //show image values
+     }
    }
    printf( "\n" );
+
    _writeoutline( line, IMWD );
    //printf( "DataOutStream: Line written...\n" );
  }
@@ -385,6 +403,10 @@ void orientation( client interface i2c_master_if i2c, chanend toDist) {
 
 // Unit tests
 void tests() {
+   assert(NPKT == IMWD/8);
+   assert(mod(2,5) == 1);
+   assert(mod(8, 17) == 1);
+   assert(5 / 2 == 2);
    assert(pack(3, 0x00, 0xFF) == 0x08);
    uchar testVal = 0xE6; // 11100110
    assert(unpack(0, testVal) == 0);
@@ -395,7 +417,7 @@ void tests() {
    assert(unpack(5, testVal) == 1);
    assert(unpack(6, testVal) == 1);
    assert(unpack(7, testVal) == 1);
-
+   printf("Tests successful\n");
 }
 
 /////////////////////////////////////////////////////////////////////////////////////////
@@ -416,8 +438,8 @@ int main(void) {
   par {
     on tile[0] : i2c_master(i2c, 1, p_scl, p_sda, 10);              //server thread providing orientation data
     on tile[0] : orientation(i2c[0],c_control);                     //client thread reading orientation data
-    on tile[0] : DataInStream("64x64.pgm", c_inIO);                  //thread to read in a PGM image
-    on tile[0] : DataOutStream("64x64out.pgm", c_outIO);             //thread to write out a PGM image
+    on tile[0] : DataInStream("test.pgm", c_inIO);                  //thread to read in a PGM image
+    on tile[0] : DataOutStream("testout.pgm", c_outIO);             //thread to write out a PGM image
     on tile[0] : distributor(c_inIO, c_outIO, c_control, WtoD);     //thread to coordinate work on image
     //initialise 4 workers
     on tile[1] : worker(0, WtoD[0], WtoW[3], WtoW[0]);

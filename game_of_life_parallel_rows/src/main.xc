@@ -7,6 +7,7 @@
 #include <stdio.h>
 #include "pgmIO.h"
 #include "i2c.h"
+#include <assert.h>
 
 #define  IMHT 64                  //image height
 #define  IMWD 64                  //image width
@@ -28,6 +29,8 @@ on tile[0]:port p_sda = XS1_PORT_1F;
 #define FXOS8700EQ_OUT_Z_MSB 0x5
 #define FXOS8700EQ_OUT_Z_LSB 0x6
 
+void tests();
+
 // modulo function that works with negatives
 int mod(int n,int x) {
   while (x < 0  || x > (n-1)) {
@@ -37,9 +40,9 @@ int mod(int n,int x) {
   return x;
 }
 
-uchar pack(int index, uchar byte, uchar c) {
+uchar pack(int index, uchar byte, uchar c) {    // pack c into packet 'byte' at index 'index'
     if (c == 0x0) {
-        byte = byte | (0 << index);
+        byte = byte & ~(1 << index);
         index++;
     }
     else if (c == 0xFF) {
@@ -47,6 +50,10 @@ uchar pack(int index, uchar byte, uchar c) {
         index++;
     }
     return byte;
+}
+
+int unpack(int index, uchar byte) {             // unpack bit from index 'index' of packet 'byte'
+    return (byte >> index) & 1;
 }
 
 /////////////////////////////////////////////////////////////////////////////////////////
@@ -103,6 +110,8 @@ void DataInStream(char infname[], chanend c_out)
 /////////////////////////////////////////////////////////////////////////////////////////
 void distributor(chanend c_in, chanend c_out, chanend fromAcc, chanend worker[NWKS])
 {
+    tests();
+
     uchar val[IMWD][IMHT];    // World state
 
     //Starting up and wait for tilting of the xCore-200 Explorer
@@ -352,15 +361,27 @@ void orientation( client interface i2c_master_if i2c, chanend toDist) {
   }
 }
 
+// Unit tests
+void tests() {
+   assert(pack(3, 0x00, 0xFF) == 0x08);
+   uchar testVal = 0xE6; // 11100110
+   assert(unpack(0, testVal) == 0);
+   assert(unpack(1, testVal) == 1);
+   assert(unpack(2, testVal) == 1);
+   assert(unpack(3, testVal) == 0);
+   assert(unpack(4, testVal) == 0);
+   assert(unpack(5, testVal) == 1);
+   assert(unpack(6, testVal) == 1);
+   assert(unpack(7, testVal) == 1);
+
+}
+
 /////////////////////////////////////////////////////////////////////////////////////////
 //
 // Orchestrate concurrent system and start up all threads
 //
 /////////////////////////////////////////////////////////////////////////////////////////
 int main(void) {
-
-
-
   i2c_master_if i2c[1];                          // interface to orientation sensor
 
   // Channel definitions

@@ -86,11 +86,14 @@ void DataInStream(char infname[], chanend c_out)
   for( int y = 0; y < IMHT; y++ ) {
     _readinline( line, IMWD );
 
-    for( int x = 0; x < IMWD; x++ ) {
-      c_out <: line[ x ];
-      //printf( "-%4.1d ", line[ x ] ); //show image values
+    uchar packet = 0x00;
+    for ( int p = 0; p < IMWD/8; p++) {         // for every packet we can fit in the row
+        for ( int x = 0; x < 8; x++) {          // for each of the eight bits to be packed
+            pack(x, packet, line[x + p*8]);
+        }
+        c_out <: packet;
+        packet = 0x00;
     }
-    //printf( "\n" );
   }
 
   //Close PGM image file
@@ -112,7 +115,7 @@ void distributor(chanend c_in, chanend c_out, chanend fromAcc, chanend worker[NW
 {
     tests();
 
-    uchar val[IMWD][IMHT];    // World state
+    uchar val[IMWD/8][IMHT];    // World state
 
     //Starting up and wait for tilting of the xCore-200 Explorer
     printf( "ProcessImage: Start, size = %dx%d\n", IMHT, IMWD );
@@ -122,7 +125,7 @@ void distributor(chanend c_in, chanend c_out, chanend fromAcc, chanend worker[NW
     printf( "Processing...\n" );
 
     for(int y = 0; y < IMHT; y++ ) {       // Read every pixel into world array
-        for( int x = 0; x < IMWD; x++ ) {
+        for( int x = 0; x < IMWD/8; x++ ) {
            c_in :> val[x][y];
         }
     }
@@ -130,7 +133,7 @@ void distributor(chanend c_in, chanend c_out, chanend fromAcc, chanend worker[NW
     // Divide work between workers
     for(int w = 0; w < NWKS; w++) {                         // for each of the workers
         for(int y = 0; y < ((IMHT / NWKS) + 2); y++ ) {     // for the portion of rows to be given to the worker
-            for( int x = 0; x < IMWD; x++ ) {               // for every column
+            for( int x = 0; x < IMWD/8; x++ ) {               // for every column
                 // send cell values to the worker, who will combine them into a new array
                 worker[w] <: val[x][mod(IMHT, (y + (w*(IMHT / NWKS)) - 1))];
             }
@@ -157,20 +160,39 @@ void distributor(chanend c_in, chanend c_out, chanend fromAcc, chanend worker[NW
     //printf( "\nOne processing round completed...\n" );
 }
 
-int getNeighbours(int x, int y, uchar rowVal[IMWD][IMHT / NWKS + 2]) {
+int getNeighbours(int x, int y, uchar rowVal[IMWD/8][IMHT / NWKS + 2]) {
+
+    // e.g. 26th bit is going to be the 3rd bit of the 4th packet
+    //      in this case b = 3, p = 4
+    int b = mod(x, 8);
+    int p = x / 8;
+
     // variables used in finding neighbours
     int xRight = mod(IMWD, x+1);
     int xLeft = mod(IMWD, x-1);
-    int yUp = y-1;
-    int yDown = y+1;
+
+    // coordinates for neighbours
+    int nCoords[8][2] = {
+            {xLeft, y + 1}, {x, y + 1}, {xRight, y + 1},
+            {xLeft, y},                 {xRight, y},
+            {xLeft, y - 1}, {x, y - 1}, {xRight, y - 1}
+    };
+
     // store states of neighbours in array
-    uchar neighbours[8] = {(rowVal[xLeft][yUp]),   (rowVal[x][yUp]),   (rowVal[xRight][yUp]),
-                           (rowVal[xLeft][y]),                         (rowVal[xRight][y]),
-                           (rowVal[xLeft][yDown]), (rowVal[x][yDown]), (rowVal[xRight][yDown])};
+    int neighbours[8] = {1,1,1,1,1,1,1,1};
+
+    int nB, nP;                     // integers to store packet# and index within that packet of each neighbours
+    for (int n = 0; n < 8; n++) {   // for each neighbour
+        nB = mod(nCoords[n][0], 8);
+        nP = nCoords[n][0] / 8;
+
+        neighbours[n] = unpack(nB, rowVal[nP][nCoords[n][1]]);
+    }
+
     // count number of alive neighbours
     int alive = 0;
     for (int i = 0; i < 8; i++) {
-        if (neighbours[i] == 0xFF) alive++;
+        if (neighbours[i] == 1) alive++;
     }
     return alive;
 }
@@ -186,15 +208,15 @@ void worker(int id, chanend fromFarmer, chanend wLeft, chanend wRight)
     // number of rows worker is processing (excluding ghost rows)
     int load = IMHT / NWKS;
     // array of rows worker will work on
-    uchar rowVal[IMWD][(IMHT / NWKS) + 2];
+    uchar rowVal[IMWD/8][(IMHT / NWKS) + 2];
     // array for output rows
-    uchar newVal[IMWD][(IMHT / NWKS)];
+    uchar newVal[IMWD/8][(IMHT / NWKS)];
     // iteration counter
     int i = 0;
 
     // contruct array to work on
     for( int y = 0; y < (load + 2); y++ ) {     // for every row to be input
-        for( int x = 0; x < IMWD; x++ ) {         // for every column
+        for( int x = 0; x < IMWD/8; x++ ) {         // for every column
             // read in rows cell by cell from distributer to be worked on
             fromFarmer :> rowVal[x][y];
         }
@@ -204,8 +226,8 @@ void worker(int id, chanend fromFarmer, chanend wLeft, chanend wRight)
         i++;
 
         // Look at neighbouring cells and work out the next state of each cell
-        for( int y = 1; y < load + 1; y++ ) {   // for every row excluding edge rows
-            for( int x = 0; x < IMWD; x++ ) {            // for every column
+        for( int y = 1; y < load + 1; y++ ) {               // for every row excluding edge rows
+            for( int x = 0; x < IMWD/8; x++ ) {             // for every column
                 // set cell to alive by default
                 newVal[x][y - 1] = 0xFF;
 

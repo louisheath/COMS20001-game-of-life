@@ -495,6 +495,23 @@
     </values>
   </arg>
 </fCall>
+<fCall name="pack" global="true" numArgs="3">
+  <arg num="0">
+    <values>
+      <value type="unknown"/>
+    </values>
+  </arg>
+  <arg num="1">
+    <values>
+      <value type="unknown"/>
+    </values>
+  </arg>
+  <arg num="2">
+    <values>
+      <value type="unknown"/>
+    </values>
+  </arg>
+</fCall>
 <fCall name="_closeinpgm" global="true" numArgs="0">
 </fCall>
 <fCall name="printf" global="true" numArgs="2">
@@ -556,6 +573,18 @@
 </fCall>
 <fCall name="mod" global="true" numArgs="2">
   <arg num="0">
+    <passThroughArg param="0" caller="getNeighbours" global="true"/>
+    <values>
+    </values>
+  </arg>
+  <arg num="1">
+    <values>
+      <value type="intval"><intval isSigned="true" val="8"/></value>
+    </values>
+  </arg>
+</fCall>
+<fCall name="mod" global="true" numArgs="2">
+  <arg num="0">
     <values>
       <value type="intval"><intval isSigned="true" val="64"/></value>
     </values>
@@ -575,6 +604,18 @@
   <arg num="1">
     <values>
       <value type="unknown"/>
+    </values>
+  </arg>
+</fCall>
+<fCall name="mod" global="true" numArgs="2">
+  <arg num="0">
+    <values>
+      <value type="unknown"/>
+    </values>
+  </arg>
+  <arg num="1">
+    <values>
+      <value type="intval"><intval isSigned="true" val="8"/></value>
     </values>
   </arg>
 </fCall>
@@ -788,7 +829,7 @@
   </arg>
   <arg num="1">
     <values>
-      <value type="intval"><intval isSigned="true" val="366"/></value>
+      <value type="intval"><intval isSigned="true" val="386"/></value>
     </values>
   </arg>
   <arg num="2">
@@ -817,7 +858,7 @@
   </arg>
   <arg num="1">
     <values>
-      <value type="intval"><intval isSigned="true" val="368"/></value>
+      <value type="intval"><intval isSigned="true" val="388"/></value>
     </values>
   </arg>
   <arg num="2">
@@ -846,7 +887,7 @@
   </arg>
   <arg num="1">
     <values>
-      <value type="intval"><intval isSigned="true" val="369"/></value>
+      <value type="intval"><intval isSigned="true" val="389"/></value>
     </values>
   </arg>
   <arg num="2">
@@ -875,7 +916,7 @@
   </arg>
   <arg num="1">
     <values>
-      <value type="intval"><intval isSigned="true" val="370"/></value>
+      <value type="intval"><intval isSigned="true" val="390"/></value>
     </values>
   </arg>
   <arg num="2">
@@ -904,7 +945,7 @@
   </arg>
   <arg num="1">
     <values>
-      <value type="intval"><intval isSigned="true" val="371"/></value>
+      <value type="intval"><intval isSigned="true" val="391"/></value>
     </values>
   </arg>
   <arg num="2">
@@ -933,7 +974,7 @@
   </arg>
   <arg num="1">
     <values>
-      <value type="intval"><intval isSigned="true" val="372"/></value>
+      <value type="intval"><intval isSigned="true" val="392"/></value>
     </values>
   </arg>
   <arg num="2">
@@ -962,7 +1003,7 @@
   </arg>
   <arg num="1">
     <values>
-      <value type="intval"><intval isSigned="true" val="373"/></value>
+      <value type="intval"><intval isSigned="true" val="393"/></value>
     </values>
   </arg>
   <arg num="2">
@@ -991,7 +1032,7 @@
   </arg>
   <arg num="1">
     <values>
-      <value type="intval"><intval isSigned="true" val="374"/></value>
+      <value type="intval"><intval isSigned="true" val="394"/></value>
     </values>
   </arg>
   <arg num="2">
@@ -1020,7 +1061,7 @@
   </arg>
   <arg num="1">
     <values>
-      <value type="intval"><intval isSigned="true" val="375"/></value>
+      <value type="intval"><intval isSigned="true" val="395"/></value>
     </values>
   </arg>
   <arg num="2">

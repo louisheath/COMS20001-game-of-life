@@ -9,6 +9,7 @@
 
 #define  IMHT 16                  //image height
 #define  IMWD 16                  //image width
+#define  NPKT IMWD/8              //number of packets in a row
 
 typedef unsigned char uchar;      //using uchar as shorthand
 
@@ -35,6 +36,22 @@ int mod(int n,int x) {
   return x;
 }
 
+uchar pack(int index, uchar byte, uchar c) {    // pack c into packet 'byte' at index 'index'
+    if (c == 0x0) {
+        byte = byte & ~(1 << index);
+        index++;
+    }
+    else if (c == 0xFF) {
+        byte = byte | (1 << index);
+        index++;
+    }
+    return byte;
+}
+
+int unpack(int index, uchar byte) {             // unpack bit from index 'index' of packet 'byte'
+    return (byte >> index) & 1;
+}
+
 /////////////////////////////////////////////////////////////////////////////////////////
 //
 // Read Image from PGM file from path infname[] to channel c_out
@@ -54,14 +71,20 @@ void DataInStream(char infname[], chanend c_out)
   }
 
   //Read image line-by-line and send byte by byte to channel c_out
-  for( int y = 0; y < IMHT; y++ ) {
-    _readinline( line, IMWD );
-    for( int x = 0; x < IMWD; x++ ) {
-      c_out <: line[ x ];
-      printf( "-%4.1d ", line[ x ] ); //show image values
+    for( int y = 0; y < IMHT; y++ ) {
+      _readinline( line, IMWD );
+
+      uchar packet = 0x00;
+      for ( int p = 0; p < NPKT; p++) {         // for every packet we can fit in the row
+          for ( int x = 0; x < 8; x++) {          // for each of the eight bits to be packed
+              packet = pack(x, packet, line[x + p*8]);
+              //printf( "-%4.1d ", line[p*8 + x] ); //show image values
+          }
+          c_out <: packet;
+          packet = 0x00;
+      }
+      //printf("\n");
     }
-    printf( "\n" );
-  }
 
   //Close PGM image file
   _closeinpgm();
@@ -78,6 +101,39 @@ int modn(int n, int x){
   return x;
 }
 
+int getNeighbours(int x, int y, uchar rowVal[NPKT][IMHT]) {
+    // variables used in finding neighbours
+    int xRight = mod(IMWD, x+1);
+    int xLeft = mod(IMWD, x-1);
+
+    // coordinates for neighbours
+    int nCoords[8][2] = {
+            {xLeft, y - 1}, {x, y - 1}, {xRight, y - 1},
+            {xLeft, y},                 {xRight, y},
+            {xLeft, y + 1}, {x, y + 1}, {xRight, y + 1}
+    };
+
+    // store states of neighbours in array
+    int neighbours[8];
+
+    // e.g. 26th bit is going to be the 3rd bit of the 4th packet
+    //      in this case b = 3, p = 4
+    int b, p;
+    for (int n = 0; n < 8; n++) {   // for each neighbour
+        b = mod(8, nCoords[n][0]);
+        p = nCoords[n][0] / 8;
+
+        neighbours[n] = unpack(b, rowVal[p][nCoords[n][1]]);
+    }
+
+    // count number of alive neighbours
+    int alive = 0;
+    for (int i = 0; i < 8; i++) {
+        if (neighbours[i] == 1) alive++;
+    }
+    return alive;
+}
+
 /////////////////////////////////////////////////////////////////////////////////////////
 //
 // Start your implementation by changing this function to implement the game of life
@@ -87,8 +143,8 @@ int modn(int n, int x){
 /////////////////////////////////////////////////////////////////////////////////////////
 void distributor(chanend c_in, chanend c_out, chanend fromAcc)
 {
-  uchar val[IMWD][IMHT]; //To store snapshot of current image
-  uchar newVal[IMWD][IMHT]; //To store new snapshot of image
+  uchar val[NPKT][IMHT]; //To store snapshot of current image
+  uchar newVal[NPKT][IMHT]; //To store new snapshot of image
 
   //Starting up and wait for tilting of the xCore-200 Explorer
   printf( "ProcessImage: Start, size = %dx%d\n", IMHT, IMWD );
@@ -100,60 +156,45 @@ void distributor(chanend c_in, chanend c_out, chanend fromAcc)
   //change the image according to the "Game of Life"
   printf( "Processing...\n" );
 
-  for( int y = 0; y < IMHT; y++ ) {   //go through all lines
-    for( int x = 0; x < IMWD; x++ ) { //go through each pixel per line
-      c_in :> val[x][y];                   //read the pixel value
-    }
+  for(int y = 0; y < IMHT; y++ ) {       // Read every packet into world array
+      for( int p = 0; p < NPKT; p++ ) {
+         c_in :> val[p][y];
+      }
   }
 
   while(1) {
       for( int y = 0; y < IMHT; y++ ) {   //go through all lines
-         for( int x = 0; x < IMWD; x++ ) { //go through each pixel per line
-            //store neighbours in 1D array
-            int xRight = mod(IMWD, x+1);
-            int xLeft = mod(IMWD, x-1);
-            int yUp = mod(IMHT, y-1);
-            int yDown = mod(IMHT, y+1);
+         for( int p = 0; p < NPKT; p++ ) { //go through each pixel per line
+             // packet for new cell values, start with all alive
+             uchar newP = 0xFF;
+             for ( int x = 0; x < 8; x++ ) { // go through each pixel in the packet
 
-            uchar neighbours[8] = {(val[xLeft][yUp]), (val[x][yUp]), (val[xRight][yUp]),
-                                   (val[xLeft][y]), (val[xRight][y]),
-                                   (val[xLeft][yDown]), (val[x][yDown]), (val[xRight][yDown])};
-            int alive = 0;
-            for (int i = 0; i < 8; i++) {
-                if (neighbours[i] == 0xFF) {
-                    alive++;
-                }
-            }
-            // If currently alive
-            if (val[x][y] == 0xFF) {
-                // If number of alive neighbours isn't two or three, die. Else stay alive by default
-                if (alive != 2 && alive != 3) {
-                    newVal[x][y] = 0x0;
-                }
-                else
-                {
-                    newVal[x][y] = 0xFF;
-                }
-            }
-            // Else cell is currently dead: if three alive neighbours resurrect
-            else {
-                if (alive == 3) {
-                    newVal[x][y] = 0xFF;
-                }
-                else newVal[x][y] = 0x0;
-            }
+                 // get number of alive neighbours
+                 int alive = getNeighbours(x + p*8, y, val);
+
+                 // If currently alive
+                 if (unpack(x, val[p][y]) == 1) {
+                     // If number of alive neighbours isn't two or three, die. Else stay alive by default
+                     if (alive != 2 && alive != 3)
+                         newP = pack(x, newP, 0x0);
+                 }
+                 // Else cell is currently dead: if not exactly three alive neighbours stay dead
+                 else if (alive != 3)
+                     newP = pack(x, newP, 0x0);
+             }
          }
        }
 
-      for( int y = 0; y < IMHT; y++ ) {   //go through all lines
-          for( int x = 0; x < IMWD; x++ ) { //go through each pixel per line
-            c_out <: newVal[x][y]; //send some modified pixel out
+      // Send processed data to DataOutStream
+      for(int y = 0; y < IMHT; y++ ) {
+          for( int p = 0; p < NPKT; p++ ) { // for every packet
+              c_out <: newVal[p][y];           // send cell information to DataOutStream
           }
       }
 
       for( int y = 0; y < IMHT; y++ ) {   //go through all lines
-          for( int x = 0; x < IMWD; x++ ) { //go through each pixel per line
-            val[x][y] = newVal[x][y];                   //transfer new pixels to old array
+          for( int p = 0; p < IMWD; p++ ) { //go through each pixel per line
+            val[p][y] = newVal[p][y];                   //transfer new pixels to old array
           }
       }
       //printf( "\nOne processing round completed...\n" );

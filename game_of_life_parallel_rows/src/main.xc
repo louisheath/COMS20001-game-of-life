@@ -133,20 +133,21 @@ void distributor(chanend c_in, chanend c_out, chanend fromAcc, chanend worker[NW
         }
     }
 
-//    // TEST: write out packed world
-//      //Compile each line of the image and write the image line-by-line
-//      for( int y = 0; y < IMHT; y++ ) {
-//        for( int p = 0; p < NPKT; p++ ) {
-//          uchar packet = val[p][y];
-//
-//          // unpack each bit and add to output line
-//          for ( int x = 0; x < 8; x++ ) {
-//              printf( "-%4.1d ", unpack(x, packet) ); //show image values
-//          }
-//        }
-//        printf( "\n" );
-//      }
+/*
+    // TEST: write out packed world
+    //Compile each line of the image and write the image line-by-line
+    for( int y = 0; y < IMHT; y++ ) {
+        for( int p = 0; p < NPKT; p++ ) {
+              uchar packet = val[p][y];
 
+              // unpack each bit and add to output line
+              for ( int x = 0; x < 8; x++ ) {
+                  printf( "-%4.1d ", unpack(x, packet) ); //show image values
+              }
+        }
+        printf( "\n" );
+    }
+*/
     // Divide work between workers
     for(int w = 0; w < NWKS; w++) {                         // for each of the workers
         for(int y = 0; y < ((IMHT / NWKS) + 2); y++ ) {     // for the portion of rows to be given to the worker
@@ -196,10 +197,10 @@ int getNeighbours(int x, int y, uchar rowVal[NPKT][IMHT / NWKS + 2]) {
     //      in this case b = 3, p = 4
     int b, p;
     for (int n = 0; n < 8; n++) {   // for each neighbour
-        b = mod(8, nCoords[n][0]);
-        p = nCoords[n][0] / 8;
+        b = mod(8, nCoords[n][0]);      // get index in block of 8 bits
+        p = nCoords[n][0] / 8;          // get in which block of 8 bits we're processing
 
-        neighbours[n] = unpack(b, rowVal[p][nCoords[n][1]]);
+        neighbours[n] = unpack(b, rowVal[p][nCoords[n][1]]); //unpack neighbour value from byte
     }
 
     // count number of alive neighbours

@@ -164,7 +164,7 @@ void distributor(chanend c_in, chanend c_out, chanend fromAcc)
 
   while(1) {
       for( int y = 0; y < IMHT; y++ ) {   //go through all lines
-         for( int p = 0; p < NPKT; p++ ) { //go through each pixel per line
+         for( int p = 0; p < NPKT; p++ ) { //go through each packet per line
              // packet for new cell values, start with all alive
              uchar newP = 0xFF;
              for ( int x = 0; x < 8; x++ ) { // go through each pixel in the packet
@@ -182,6 +182,7 @@ void distributor(chanend c_in, chanend c_out, chanend fromAcc)
                  else if (alive != 3)
                      newP = pack(x, newP, 0x0);
              }
+             newVal[p][y] = newP;
          }
        }
 
@@ -193,7 +194,7 @@ void distributor(chanend c_in, chanend c_out, chanend fromAcc)
       }
 
       for( int y = 0; y < IMHT; y++ ) {   //go through all lines
-          for( int p = 0; p < IMWD; p++ ) { //go through each pixel per line
+          for( int p = 0; p < NPKT; p++ ) { //go through each pixel per line
             val[p][y] = newVal[p][y];                   //transfer new pixels to old array
           }
       }

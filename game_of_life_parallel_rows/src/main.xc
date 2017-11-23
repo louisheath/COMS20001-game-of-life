@@ -9,9 +9,9 @@
 #include "i2c.h"
 #include <assert.h>
 
-#define  IMHT 16                  //image height
-#define  IMWD 16                  //image width
-#define  NWKS 4                   //number of workers
+#define  IMHT 512                  //image height
+#define  IMWD 512                  //image width
+#define  NWKS 8                   //number of workers
 #define  NPKT IMWD/8              //number of packets in a row
 
 typedef unsigned char uchar;      //using uchar as shorthand
@@ -57,6 +57,39 @@ int unpack(int index, uchar byte) {             // unpack bit from index 'index'
     return (byte >> index) & 1;
 }
 
+void checkTime(chanend reqTime) {
+    //global timer variables
+    timer t;
+    uint32_t start = 0;
+    uint32_t prev = 0;
+    uint32_t curr = 0;
+    uint32_t timeTaken = 0;
+
+    int run = 0;
+
+    reqTime :> run;
+    t :> start;
+
+    //if timer has maxed out then add a whole cycle (2^32 - 1 ticks)
+    while (1){
+        [[ordered]]
+        select {
+            case reqTime :> int x:
+                t:> curr;
+                timeTaken += ((curr - start) / 100000);
+                reqTime <: timeTaken;
+                break;
+            default:
+                t :> curr;
+                if (prev > curr){
+                    timeTaken += 42950;
+                }
+                prev = curr;
+                break;
+        }
+    }
+}
+
 /////////////////////////////////////////////////////////////////////////////////////////
 //
 // Read Image from PGM file from path infname[] to channel c_out
@@ -64,18 +97,10 @@ int unpack(int index, uchar byte) {             // unpack bit from index 'index'
 /////////////////////////////////////////////////////////////////////////////////////////
 void DataInStream(char infname[], chanend c_out)
 {
-  //set up timer arguments
-  timer t;
-  uint32_t start;
-  uint32_t now;
-  uint32_t end;
-
   int res;
-  int i = 0; //count 8 transfers into an array for packing
   uchar line[ IMWD ];
 
   printf( "DataInStream: Start...\n");
-  t :> start;
   //Open PGM file
   res = _openinpgm( infname, IMWD, IMHT );
   if( res ) {
@@ -101,8 +126,7 @@ void DataInStream(char infname[], chanend c_out)
 
   //Close PGM image file
   _closeinpgm();
-  t :> end;
-  printf( "DataInStream: Complete in %d\n", (end-start)/100000000);
+  printf( "DataInStream: Complete\n");
   return;
 }
 
@@ -114,11 +138,12 @@ void DataInStream(char infname[], chanend c_out)
 //             and sends new world to DataStreamOut
 //
 /////////////////////////////////////////////////////////////////////////////////////////
-void distributor(chanend c_in, chanend c_out, chanend fromAcc, chanend worker[NWKS])
+void distributor(chanend c_in, chanend c_out, chanend fromAcc, chanend worker[NWKS], chanend reqTime)
 {
     tests();
 
     uchar val[NPKT][IMHT];    // World state
+    uint32_t timeTaken;       // time taken to process image
 
     //Starting up and wait for tilting of the xCore-200 Explorer
     printf( "ProcessImage: Start, size = %dx%d\n", IMHT, IMWD );
@@ -147,9 +172,12 @@ void distributor(chanend c_in, chanend c_out, chanend fromAcc, chanend worker[NW
         }
         printf( "\n" );
     }
+
 */
+    reqTime <: 1; //trigger timer funtion
+
     // Divide work between workers
-    for(int w = 0; w < NWKS; w++) {                         // for each of the workers
+    for(int w = 0; w < NWKS; w++) {                       // for each of the workers
         for(int y = 0; y < ((IMHT / NWKS) + 2); y++ ) {     // for the portion of rows to be given to the worker
             for( int p = 0; p < NPKT; p++ ) {               // for every packet
                 // send cell values to the worker, who will combine them into a new array
@@ -168,12 +196,18 @@ void distributor(chanend c_in, chanend c_out, chanend fromAcc, chanend worker[NW
         }
     }
 
+    reqTime <: 0; // inform timer that it wants a return for time
+    reqTime :> timeTaken; // store returned time
+
+    printf("Processing: Complete in %dms\n", timeTaken);
+
     // Send processed data to DataOutStream
     for(int y = 0; y < IMHT; y++ ) {
         for( int p = 0; p < NPKT; p++ ) { // for every packet
             c_out <: val[p][y];           // send cell information to DataOutStream
         }
     }
+
 
     //printf( "\nOne processing round completed...\n" );
 }
@@ -236,8 +270,6 @@ void worker(int id, chanend fromFarmer, chanend wLeft, chanend wRight)
     }
 
     while (i < 100) {
-        i++;
-
         // Look at neighbouring cells and work out the next state of each cell
         for( int y = 1; y < load + 1; y++ ) {              // for every row excluding edge rows
             for( int p = 0; p < NPKT; p++ ) {             // for every packet in the row
@@ -307,6 +339,7 @@ void worker(int id, chanend fromFarmer, chanend wLeft, chanend wRight)
            for ( int p = 0; p < NPKT; p++ )
                wLeft <: newVal[p][0];
        }
+       i++;
     }
 
     // Send new cell states to farmer for combining
@@ -344,10 +377,10 @@ void DataOutStream(char outfname[], chanend c_in)
      // unpack each bit and add to output line
      for ( int x = 0; x < 8; x++ ) {
          line[p*8 + x] = unpack(x, packet);
-         printf( "-%4.1d ", line[p*8 + x] ); //show image values
+         //printf( "-%4.1d ", line[p*8 + x] ); //show image values
      }
    }
-   printf( "\n" );
+   //printf( "\n" );
 
    _writeoutline( line, IMWD );
    //printf( "DataOutStream: Line written...\n" );
@@ -434,19 +467,20 @@ int main(void) {
        c_outIO,    // DataStreamOut
        c_control,  // Orientation sensor
        WtoD[NWKS], // Workers to Distributer
-       WtoW[NWKS]; // Workers to Workers
+       WtoW[NWKS], // Workers to Workers
+       reqTime;    // request time
 
   par {
     on tile[0] : i2c_master(i2c, 1, p_scl, p_sda, 10);              //server thread providing orientation data
     on tile[0] : orientation(i2c[0],c_control);                     //client thread reading orientation data
-    on tile[0] : DataInStream("test.pgm", c_inIO);                  //thread to read in a PGM image
-    on tile[0] : DataOutStream("testout.pgm", c_outIO);             //thread to write out a PGM image
-    on tile[0] : distributor(c_inIO, c_outIO, c_control, WtoD);     //thread to coordinate work on image
-    //initialise 4 workers
-    on tile[1] : worker(0, WtoD[0], WtoW[3], WtoW[0]);
-    on tile[1] : worker(1, WtoD[1], WtoW[0], WtoW[1]);
-    on tile[1] : worker(2, WtoD[2], WtoW[1], WtoW[2]);
-    on tile[1] : worker(3, WtoD[3], WtoW[2], WtoW[3]);
+    on tile[0] : DataInStream("512x512.pgm", c_inIO);                  //thread to read in a PGM image
+    on tile[0] : DataOutStream("512x512out.pgm", c_outIO);             //thread to write out a PGM image
+    on tile[0] : distributor(c_inIO, c_outIO, c_control, WtoD, reqTime);     //thread to coordinate work on image
+    on tile[0] : checkTime(reqTime);
+    //initialise workers
+    par (int i = 0; i < NWKS ; i++){
+        on tile[1] : worker((i+1) % NWKS, WtoD[(i+1) % NWKS], WtoW[i], WtoW[(i+1) % NWKS]);
+    }
     // channels between workers: e.g. 4 workers
     //
     //    <--- w0 <-----> w1 <-----> w2 <-----> w3 --->

@@ -7,8 +7,8 @@
 #include "pgmIO.h"
 #include "i2c.h"
 
-#define  IMHT 16                  //image height
-#define  IMWD 16                  //image width
+#define  IMHT 64                  //image height
+#define  IMWD 64                  //image width
 #define  NPKT IMWD/8              //number of packets in a row
 
 typedef unsigned char uchar;      //using uchar as shorthand
@@ -83,12 +83,13 @@ void DataInStream(char infname[], chanend c_out)
           c_out <: packet;
           packet = 0x00;
       }
-      //printf("\n");
+      //printf("\n")
     }
 
   //Close PGM image file
   _closeinpgm();
-  printf( "DataInStream: Done...\n" );
+
+  printf("DataInStream: Complete\n");
   return;
 }
 
@@ -103,14 +104,16 @@ int modn(int n, int x){
 
 int getNeighbours(int x, int y, uchar rowVal[NPKT][IMHT]) {
     // variables used in finding neighbours
-    int xRight = mod(IMWD, x+1);
-    int xLeft = mod(IMWD, x-1);
+    int xRight  = mod(IMWD, x+1);
+    int xLeft   = mod(IMWD, x-1);
+    int yUp     = mod(IMHT, y-1);
+    int yDown   = mod(IMHT, y+1);
 
     // coordinates for neighbours
     int nCoords[8][2] = {
-            {xLeft, y - 1}, {x, y - 1}, {xRight, y - 1},
+            {xLeft, yUp},   {x, yUp},   {xRight, yUp},
             {xLeft, y},                 {xRight, y},
-            {xLeft, y + 1}, {x, y + 1}, {xRight, y + 1}
+            {xLeft, yDown}, {x, yDown}, {xRight, yDown}
     };
 
     // store states of neighbours in array
@@ -122,7 +125,6 @@ int getNeighbours(int x, int y, uchar rowVal[NPKT][IMHT]) {
     for (int n = 0; n < 8; n++) {   // for each neighbour
         b = mod(8, nCoords[n][0]);
         p = nCoords[n][0] / 8;
-
         neighbours[n] = unpack(b, rowVal[p][nCoords[n][1]]);
     }
 
@@ -143,8 +145,16 @@ int getNeighbours(int x, int y, uchar rowVal[NPKT][IMHT]) {
 /////////////////////////////////////////////////////////////////////////////////////////
 void distributor(chanend c_in, chanend c_out, chanend fromAcc)
 {
+  //set up timer arguments
+  timer t;
+  uint32_t start;
+  uint32_t prev = 0;
+  uint32_t curr = 1000000;
+  uint32_t timeTaken = 0;
+
   uchar val[NPKT][IMHT]; //To store snapshot of current image
   uchar newVal[NPKT][IMHT]; //To store new snapshot of image
+  int i = 0; //Counter for the iterations
 
   //Starting up and wait for tilting of the xCore-200 Explorer
   printf( "ProcessImage: Start, size = %dx%d\n", IMHT, IMWD );
@@ -162,7 +172,17 @@ void distributor(chanend c_in, chanend c_out, chanend fromAcc)
       }
   }
 
-  while(1) {
+  t :> start; //Start timer after all data has been read in
+
+  while(i < 100) {
+
+      //if timer has maxed out then add a whole cycle (2^32 - 1 ticks)
+      t :> curr;
+      if (prev > curr){
+          timeTaken += 42950;
+      }
+      prev = curr;
+
       for( int y = 0; y < IMHT; y++ ) {   //go through all lines
          for( int p = 0; p < NPKT; p++ ) { //go through each packet per line
              // packet for new cell values, start with all alive
@@ -186,19 +206,31 @@ void distributor(chanend c_in, chanend c_out, chanend fromAcc)
          }
        }
 
-      // Send processed data to DataOutStream
-      for(int y = 0; y < IMHT; y++ ) {
-          for( int p = 0; p < NPKT; p++ ) { // for every packet
-              c_out <: newVal[p][y];           // send cell information to DataOutStream
-          }
-      }
-
       for( int y = 0; y < IMHT; y++ ) {   //go through all lines
           for( int p = 0; p < NPKT; p++ ) { //go through each pixel per line
             val[p][y] = newVal[p][y];                   //transfer new pixels to old array
           }
       }
       //printf( "\nOne processing round completed...\n" );
+
+      //Increment iteration
+      i++;
+  }
+
+  t :> curr;
+  //Another check similar to the one inside the loop
+  if (prev > curr){
+    timeTaken += 42950;
+  }
+  //set time taken for this function
+  timeTaken += ((curr - start) / 100000);
+  printf("Processing: Complete in %dms\n", timeTaken);
+
+  // Send processed data to DataOutStream
+  for(int y = 0; y < IMHT; y++ ) {
+      for( int p = 0; p < NPKT; p++ ) { // for every packet
+          c_out <: newVal[p][y];           // send cell information to DataOutStream
+      }
   }
 }
 
@@ -211,44 +243,36 @@ void DataOutStream(char outfname[], chanend c_in)
 {
   int res;
   uchar line[ IMWD ];
-  int x = 0;
 
   //Open PGM file
   printf( "DataOutStream: Start...\n" );
+
   res = _openoutpgm( outfname, IMWD, IMHT );
   if( res ) {
     printf( "DataOutStream: Error opening %s\n.", outfname );
     return;
   }
-  while (x < 100){
-      //Compile each line of the image and write the image line-by-line
-      if (x == 99) {
-          for( int y = 0; y < IMHT; y++ ) {
-            for( int x = 0; x < IMWD; x++ ) {
-              c_in :> line[ x ];
-              printf( "-%4.1d ", line[ x ] ); //show image values
-            }
-            printf( "\n" );
-            _writeoutline( line, IMWD );
-            //printf( "DataOutStream: Line written...\n" );
-          }
-          x++;
+  //Compile each line of the image and write the image line-by-line
+  for( int y = 0; y < IMHT; y++ ) {
+    for( int p = 0; p < NPKT; p++ ) {
+      uchar packet;
+      c_in :> packet;
+
+      // unpack each bit and add to output line
+      for ( int x = 0; x < 8; x++ ) {
+          line[p*8 + x] = unpack(x, packet);
+          //printf( "-%4.1d", line[p*8 + x]); //show image values
       }
-      else{
-          for( int y = 0; y < IMHT; y++ ) {
-              for( int x = 0; x < IMWD; x++ ) {
-                c_in :> line[ x ];
-              }
-              _writeoutline( line, IMWD );
-              //printf( "DataOutStream: Line written...\n" );
-          }
-          x++;
-      }
+    }
+    //printf( "\n" );
+    _writeoutline( line, IMWD );
+    //printf( "DataOutStream: Line written...\n" );
   }
 
   //Close the PGM image
   _closeoutpgm();
-  printf( "DataOutStream: Done...\n" );
+
+  printf( "DataOutStream: Complete\n");
   return;
 }
 
@@ -304,8 +328,8 @@ int main(void) {
 
 i2c_master_if i2c[1];               //interface to orientation
 
-char infname[] = "test.pgm";     //put your input image path here
-char outfname[] = "testout.pgm"; //put your output image path here
+char infname[] = "64x64.pgm";     //put your input image path here
+char outfname[] = "64x64out.pgm"; //put your output image path here
 chan c_inIO, c_outIO, c_control;    //extend your channel definitions here
 
 par {

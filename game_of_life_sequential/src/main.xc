@@ -18,6 +18,10 @@ port p_sda = XS1_PORT_1F;
 
 in port buttons = XS1_PORT_4E; //port to access xCore-200 buttons
 out port leds = XS1_PORT_4F;   //port to access xCore-200 LEDs
+    //1st bit...separate green LED
+    //2nd bit...blue LED
+    //3rd bit...green LED
+    //4th bit...red LED
 
 #define FXOS8700EQ_I2C_ADDR 0x1E  //register addresses for orientation
 #define FXOS8700EQ_XYZ_DATA_CFG_REG 0x0E
@@ -88,18 +92,6 @@ void checkTime(chanend reqTime) {
     }
 }
 
-//DISPLAYS an LED pattern
-int showLEDs(out port p, chanend fromDist) {
-  int pattern; //1st bit...separate green LED
-               //2nd bit...blue LED
-               //3rd bit...green LED
-               //4th bit...red LED
-  while (1) {
-    fromDist :> pattern;   //receive new pattern from visualiser
-    p <: pattern;                //send pattern to LED port
-  }
-  return 0;
-}
 
 /////////////////////////////////////////////////////////////////////////////////////////
 //
@@ -192,7 +184,7 @@ int getNeighbours(int x, int y, uchar rowVal[NPKT][IMHT]) {
 // Currently the function just inverts the image
 //
 /////////////////////////////////////////////////////////////////////////////////////////
-void distributor(chanend c_in, chanend c_out, in port b, chanend toLEDs, chanend reqTime) {
+void distributor(chanend c_in, chanend c_out, chanend c_control, in port b, out port LEDs, chanend reqTime) {
 
   timer w;
   int waitTime = 0;
@@ -206,14 +198,14 @@ void distributor(chanend c_in, chanend c_out, in port b, chanend toLEDs, chanend
 
   //Starting up and wait for tilting of the xCore-200 Explorer
   printf( "ProcessImage: Start, size = %dx%d\n", IMHT, IMWD );
-  printf( "Waiting for Board Tilt...\n" );
+  printf( "Waiting for start button...\n" );
 
   // wait for SW1 button input
   while (button != 14) {
       b :> button;
   }
 
-  toLEDs <: 4; // send green LED to be lit
+  LEDs <: 4; // send green LED to be lit
 
   printf( "Processing...\n" );
 
@@ -226,16 +218,16 @@ void distributor(chanend c_in, chanend c_out, in port b, chanend toLEDs, chanend
   reqTime <: 1; //trigger timer funtion
 
   // loop whilst sw2 hasn't been pressed
-  while(button != 13) {
+  while (button != 13) {
       // read button input, if any
       b :> button;
 
       //flash processing sperate green LED
-      toLEDs <: 1;
+      LEDs <: 1;
       w :> waitTime;                        //read current timer value
       waitTime += 100000;                 //set waitTime to 1ms after value
       w when timerafter(waitTime) :> void;  //wait until waitTime is reached
-      toLEDs <: 0;
+      LEDs <: 0;
 
       for( int y = 0; y < IMHT; y++ ) {   //go through all lines
          for( int p = 0; p < NPKT; p++ ) { //go through each packet per line
@@ -276,7 +268,7 @@ void distributor(chanend c_in, chanend c_out, in port b, chanend toLEDs, chanend
 
   printf("Processing: Complete in %dms\n", timeTaken);
 
-  toLEDs <: 2; // send blue LED to be lit
+  LEDs <: 2; // send blue LED to be lit
 
   // Send processed data to DataOutStream
   for(int y = 0; y < IMHT; y++ ) {
@@ -284,7 +276,7 @@ void distributor(chanend c_in, chanend c_out, in port b, chanend toLEDs, chanend
           c_out <: newVal[p][y];           // send cell information to DataOutStream
       }
   }
-  toLEDs <: 0; // send blue LED to be lit
+  LEDs <: 0; // send blue LED to be lit
 }
 
 /////////////////////////////////////////////////////////////////////////////////////////
@@ -334,6 +326,11 @@ void DataOutStream(char outfname[], chanend c_in)
 //
 // Initialise and  read orientation, send first tilt event to channel
 //
+// Orientation Sensor: Use the physical X-axis tilt of the board to trigger processing to be paused,
+// and continued once the board is horizontal again, indicate a pausing state by lighting the red LED,
+// print a status report when pausing starts to the console containing the number of rounds processed so far,
+// the current number of live cells and the processing time elapsed after finishing image read-in
+//
 /////////////////////////////////////////////////////////////////////////////////////////
 void orientation( client interface i2c_master_if i2c, chanend toDist) {
   i2c_regop_res_t result;
@@ -357,7 +354,7 @@ void orientation( client interface i2c_master_if i2c, chanend toDist) {
 
     //check until new orientation data is available
     do {
-      status_data = i2c.read_reg(FXOS8700EQ_I2C_ADDR, FXOS8700EQ_DR_STATUS, result);
+        status_data = i2c.read_reg(FXOS8700EQ_I2C_ADDR, FXOS8700EQ_DR_STATUS, result);
     } while (!status_data & 0x08);
 
     //get new x-axis tilt value
@@ -365,10 +362,14 @@ void orientation( client interface i2c_master_if i2c, chanend toDist) {
 
     //send signal to distributor after first tilt
     if (!tilted) {
-      if (x>30) {
-        tilted = 1 - tilted;
-        toDist <: 1;
-      }
+        if (x>30) {
+            tilted = 1;
+            toDist <: 1;
+        }
+    }
+    else if (x<10) {
+        tilted = 0;
+        toDist <: 0;
     }
   }
 }
@@ -380,25 +381,23 @@ void orientation( client interface i2c_master_if i2c, chanend toDist) {
 /////////////////////////////////////////////////////////////////////////////////////////
 int main(void) {
 
-i2c_master_if i2c[1];               //interface to orientation
+    i2c_master_if i2c[1];              //interface to orientation
 
-char infname[] = "64x64.pgm";     //put your input image path here
-char outfname[] = "64x64out.pgm"; //put your output image path here
-chan c_inIO,        // DataStreamIn
-     c_outIO,       // DataStreamOut
-     c_control,     // Orientation sensor
-     toLEDs,        // send patterns to LED port
-     reqTime;       // Request time
+    char infname[] = "64x64.pgm";     //put your input image path here
+    char outfname[] = "64x64out.pgm"; //put your output image path here
+    chan c_inIO,        // DataStreamIn
+         c_outIO,       // DataStreamOut
+         c_control,     // Orientation sensor
+         reqTime;       // Request time
 
-par {
-    i2c_master(i2c, 1, p_scl, p_sda, 10);               //server thread providing orientation data
-    orientation(i2c[0],c_control);                      //client thread reading orientation data
-    DataInStream(infname, c_inIO);                      //thread to read in a PGM image
-    DataOutStream(outfname, c_outIO);                   //thread to write out a PGM image
-    distributor(c_inIO, c_outIO, buttons, toLEDs, reqTime);   //thread to coordinate work on image
-    checkTime(reqTime);
-    showLEDs(leds,toLEDs);
-}
+    par {
+        i2c_master(i2c, 1, p_scl, p_sda, 10);               //server thread providing orientation data
+        orientation(i2c[0],c_control);                      //client thread reading orientation data
+        DataInStream(infname, c_inIO);                      //thread to read in a PGM image
+        DataOutStream(outfname, c_outIO);                   //thread to write out a PGM image
+        distributor(c_inIO, c_outIO, c_control, buttons, leds, reqTime);   //thread to coordinate work on image
+        checkTime(reqTime);
+    }
 
-return 0;
+    return 0;
 }

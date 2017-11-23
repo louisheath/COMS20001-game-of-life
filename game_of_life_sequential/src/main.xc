@@ -7,8 +7,8 @@
 #include "pgmIO.h"
 #include "i2c.h"
 
-#define  IMHT 64                  //image height
-#define  IMWD 64                  //image width
+#define  IMHT 128                  //image height
+#define  IMWD 128                  //image width
 #define  NPKT IMWD/8              //number of packets in a row
 
 typedef unsigned char uchar;      //using uchar as shorthand
@@ -50,6 +50,39 @@ uchar pack(int index, uchar byte, uchar c) {    // pack c into packet 'byte' at 
 
 int unpack(int index, uchar byte) {             // unpack bit from index 'index' of packet 'byte'
     return (byte >> index) & 1;
+}
+
+void checkTime(chanend reqTime) {
+    //global timer variables
+    timer t;
+    uint32_t start = 0;
+    uint32_t prev = 0;
+    uint32_t curr = 0;
+    uint32_t timeTaken = 0;
+
+    int run = 0;
+
+    reqTime :> run;
+    t :> start;
+
+    //if timer has maxed out then add a whole cycle (2^32 - 1 ticks)
+    while (1){
+        [[ordered]]
+        select {
+            case reqTime :> int x:
+                t:> curr;
+                timeTaken += ((curr - start) / 100000);
+                reqTime <: timeTaken;
+                break;
+            default:
+                t :> curr;
+                if (prev > curr){
+                    timeTaken += 42950;
+                }
+                prev = curr;
+                break;
+        }
+    }
 }
 
 /////////////////////////////////////////////////////////////////////////////////////////
@@ -143,14 +176,9 @@ int getNeighbours(int x, int y, uchar rowVal[NPKT][IMHT]) {
 // Currently the function just inverts the image
 //
 /////////////////////////////////////////////////////////////////////////////////////////
-void distributor(chanend c_in, chanend c_out, chanend fromAcc)
+void distributor(chanend c_in, chanend c_out, chanend fromAcc, chanend reqTime)
 {
-  //set up timer arguments
-  timer t;
-  uint32_t start;
-  uint32_t prev = 0;
-  uint32_t curr = 1000000;
-  uint32_t timeTaken = 0;
+  uint32_t timeTaken;       // time taken to process image
 
   uchar val[NPKT][IMHT]; //To store snapshot of current image
   uchar newVal[NPKT][IMHT]; //To store new snapshot of image
@@ -172,16 +200,9 @@ void distributor(chanend c_in, chanend c_out, chanend fromAcc)
       }
   }
 
-  t :> start; //Start timer after all data has been read in
+  reqTime <: 1; //trigger timer funtion
 
   while(i < 100) {
-
-      //if timer has maxed out then add a whole cycle (2^32 - 1 ticks)
-      t :> curr;
-      if (prev > curr){
-          timeTaken += 42950;
-      }
-      prev = curr;
 
       for( int y = 0; y < IMHT; y++ ) {   //go through all lines
          for( int p = 0; p < NPKT; p++ ) { //go through each packet per line
@@ -217,13 +238,9 @@ void distributor(chanend c_in, chanend c_out, chanend fromAcc)
       i++;
   }
 
-  t :> curr;
-  //Another check similar to the one inside the loop
-  if (prev > curr){
-    timeTaken += 42950;
-  }
-  //set time taken for this function
-  timeTaken += ((curr - start) / 100000);
+  reqTime <: 0; // inform timer that it wants a return for time
+  reqTime :> timeTaken; // store returned time
+
   printf("Processing: Complete in %dms\n", timeTaken);
 
   // Send processed data to DataOutStream
@@ -328,16 +345,20 @@ int main(void) {
 
 i2c_master_if i2c[1];               //interface to orientation
 
-char infname[] = "64x64.pgm";     //put your input image path here
-char outfname[] = "64x64out.pgm"; //put your output image path here
-chan c_inIO, c_outIO, c_control;    //extend your channel definitions here
+char infname[] = "128x128.pgm";     //put your input image path here
+char outfname[] = "128x128out.pgm"; //put your output image path here
+chan c_inIO,        // DataStreamIn
+     c_outIO,       // DataStreamOut
+     c_control,     // Orientation sensor
+     reqTime;       // request time
 
 par {
-    i2c_master(i2c, 1, p_scl, p_sda, 10);   //server thread providing orientation data
-    orientation(i2c[0],c_control);        //client thread reading orientation data
-    DataInStream(infname, c_inIO);          //thread to read in a PGM image
-    DataOutStream(outfname, c_outIO);       //thread to write out a PGM image
-    distributor(c_inIO, c_outIO, c_control);//thread to coordinate work on image
+    i2c_master(i2c, 1, p_scl, p_sda, 10);               //server thread providing orientation data
+    orientation(i2c[0],c_control);                      //client thread reading orientation data
+    DataInStream(infname, c_inIO);                      //thread to read in a PGM image
+    DataOutStream(outfname, c_outIO);                   //thread to write out a PGM image
+    distributor(c_inIO, c_outIO, c_control, reqTime);   //thread to coordinate work on image
+    checkTime(reqTime);
 }
 
 return 0;

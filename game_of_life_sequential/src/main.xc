@@ -7,14 +7,17 @@
 #include "pgmIO.h"
 #include "i2c.h"
 
-#define  IMHT 128                  //image height
-#define  IMWD 128                  //image width
+#define  IMHT 64                  //image height
+#define  IMWD 64                  //image width
 #define  NPKT IMWD/8              //number of packets in a row
 
 typedef unsigned char uchar;      //using uchar as shorthand
 
 port p_scl = XS1_PORT_1E;         //interface ports to orientation
 port p_sda = XS1_PORT_1F;
+
+in port buttons = XS1_PORT_4E; //port to access xCore-200 buttons
+out port leds = XS1_PORT_4F;   //port to access xCore-200 LEDs
 
 #define FXOS8700EQ_I2C_ADDR 0x1E  //register addresses for orientation
 #define FXOS8700EQ_XYZ_DATA_CFG_REG 0x0E
@@ -83,6 +86,19 @@ void checkTime(chanend reqTime) {
                 break;
         }
     }
+}
+
+//DISPLAYS an LED pattern
+int showLEDs(out port p, chanend fromDist) {
+  int pattern; //1st bit...separate green LED
+               //2nd bit...blue LED
+               //3rd bit...green LED
+               //4th bit...red LED
+  while (1) {
+    fromDist :> pattern;   //receive new pattern from visualiser
+    p <: pattern;                //send pattern to LED port
+  }
+  return 0;
 }
 
 /////////////////////////////////////////////////////////////////////////////////////////
@@ -176,9 +192,13 @@ int getNeighbours(int x, int y, uchar rowVal[NPKT][IMHT]) {
 // Currently the function just inverts the image
 //
 /////////////////////////////////////////////////////////////////////////////////////////
-void distributor(chanend c_in, chanend c_out, chanend fromAcc, chanend reqTime)
-{
+void distributor(chanend c_in, chanend c_out, in port b, chanend toLEDs, chanend reqTime) {
+
+  timer w;
+  int waitTime = 0;
+
   uint32_t timeTaken;       // time taken to process image
+  int button = 0;           // button input from board/button listener
 
   uchar val[NPKT][IMHT]; //To store snapshot of current image
   uchar newVal[NPKT][IMHT]; //To store new snapshot of image
@@ -187,11 +207,14 @@ void distributor(chanend c_in, chanend c_out, chanend fromAcc, chanend reqTime)
   //Starting up and wait for tilting of the xCore-200 Explorer
   printf( "ProcessImage: Start, size = %dx%d\n", IMHT, IMWD );
   printf( "Waiting for Board Tilt...\n" );
-  fromAcc :> int value;
 
-  //Read in and do something with your image values..
-  //This just inverts every pixel, but you should
-  //change the image according to the "Game of Life"
+  // wait for SW1 button input
+  while (button != 14) {
+      b :> button;
+  }
+
+  toLEDs <: 4; // send green LED to be lit
+
   printf( "Processing...\n" );
 
   for(int y = 0; y < IMHT; y++ ) {       // Read every packet into world array
@@ -202,7 +225,17 @@ void distributor(chanend c_in, chanend c_out, chanend fromAcc, chanend reqTime)
 
   reqTime <: 1; //trigger timer funtion
 
-  while(i < 100) {
+  // loop whilst sw2 hasn't been pressed
+  while(button != 13) {
+      // read button input, if any
+      b :> button;
+
+      //flash processing sperate green LED
+      toLEDs <: 1;
+      w :> waitTime;                        //read current timer value
+      waitTime += 100000;                 //set waitTime to 1ms after value
+      w when timerafter(waitTime) :> void;  //wait until waitTime is reached
+      toLEDs <: 0;
 
       for( int y = 0; y < IMHT; y++ ) {   //go through all lines
          for( int p = 0; p < NPKT; p++ ) { //go through each packet per line
@@ -243,12 +276,15 @@ void distributor(chanend c_in, chanend c_out, chanend fromAcc, chanend reqTime)
 
   printf("Processing: Complete in %dms\n", timeTaken);
 
+  toLEDs <: 2; // send blue LED to be lit
+
   // Send processed data to DataOutStream
   for(int y = 0; y < IMHT; y++ ) {
       for( int p = 0; p < NPKT; p++ ) { // for every packet
           c_out <: newVal[p][y];           // send cell information to DataOutStream
       }
   }
+  toLEDs <: 0; // send blue LED to be lit
 }
 
 /////////////////////////////////////////////////////////////////////////////////////////
@@ -290,6 +326,7 @@ void DataOutStream(char outfname[], chanend c_in)
   _closeoutpgm();
 
   printf( "DataOutStream: Complete\n");
+
   return;
 }
 
@@ -345,20 +382,22 @@ int main(void) {
 
 i2c_master_if i2c[1];               //interface to orientation
 
-char infname[] = "128x128.pgm";     //put your input image path here
-char outfname[] = "128x128out.pgm"; //put your output image path here
+char infname[] = "64x64.pgm";     //put your input image path here
+char outfname[] = "64x64out.pgm"; //put your output image path here
 chan c_inIO,        // DataStreamIn
      c_outIO,       // DataStreamOut
      c_control,     // Orientation sensor
-     reqTime;       // request time
+     toLEDs,        // send patterns to LED port
+     reqTime;       // Request time
 
 par {
     i2c_master(i2c, 1, p_scl, p_sda, 10);               //server thread providing orientation data
     orientation(i2c[0],c_control);                      //client thread reading orientation data
     DataInStream(infname, c_inIO);                      //thread to read in a PGM image
     DataOutStream(outfname, c_outIO);                   //thread to write out a PGM image
-    distributor(c_inIO, c_outIO, c_control, reqTime);   //thread to coordinate work on image
+    distributor(c_inIO, c_outIO, buttons, toLEDs, reqTime);   //thread to coordinate work on image
     checkTime(reqTime);
+    showLEDs(leds,toLEDs);
 }
 
 return 0;

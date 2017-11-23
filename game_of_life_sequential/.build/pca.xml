@@ -436,7 +436,7 @@
     </values>
   </arg>
 </fInfo>
-<fInfo name="distributor" global="true" specialize="false" noreturn="false" doNotSpecialize="false" numParams="4">
+<fInfo name="distributor" global="true" specialize="false" noreturn="false" doNotSpecialize="false" numParams="5">
   <arg num="0" specialize="false">
     <values>
       <value type="unknown"/>
@@ -453,6 +453,11 @@
     </values>
   </arg>
   <arg num="3" specialize="false">
+    <values>
+      <value type="unknown"/>
+    </values>
+  </arg>
+  <arg num="4" specialize="false">
     <values>
       <value type="unknown"/>
     </values>
@@ -671,7 +676,7 @@
   <arg num="0" specialize="false">
     <values>
       <value type="intval"><intval isSigned="true" val="8"/></value>
-      <value type="intval"><intval isSigned="true" val="128"/></value>
+      <value type="intval"><intval isSigned="true" val="64"/></value>
     </values>
   </arg>
   <arg num="1" specialize="false">
@@ -860,6 +865,18 @@
 <fInfo name="send_stop_bit" global="true" interface="i2c_master_async_if" specialize="false" noreturn="false" doNotSpecialize="false" numParams="0">
 </fInfo>
 <fInfo name="send_stop_bit" global="true" interface="i2c_master_if" specialize="false" noreturn="false" doNotSpecialize="false" numParams="0">
+</fInfo>
+<fInfo name="showLEDs" global="true" specialize="false" noreturn="false" doNotSpecialize="false" numParams="2">
+  <arg num="0" specialize="false">
+    <values>
+      <value type="unknown"/>
+    </values>
+  </arg>
+  <arg num="1" specialize="false">
+    <values>
+      <value type="unknown"/>
+    </values>
+  </arg>
 </fInfo>
 <fInfo name="shutdown" global="true" interface="i2c_master_async_if" specialize="false" noreturn="false" doNotSpecialize="false" numParams="0">
 </fInfo>

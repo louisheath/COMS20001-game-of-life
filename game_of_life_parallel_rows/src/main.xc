@@ -9,8 +9,8 @@
 #include "i2c.h"
 #include <assert.h>
 
-#define  IMHT 64                  //image height
-#define  IMWD 64                  //image width
+#define  IMHT 512                  //image height
+#define  IMWD 512                  //image width
 #define  NWKS 8                   //number of workers
 #define  NPKT IMWD/8              //number of packets in a row
 
@@ -269,7 +269,7 @@ void worker(int id, chanend fromFarmer, chanend wLeft, chanend wRight)
         }
     }
 
-    while (i < 100) {
+    while (i < 1) {
         // Look at neighbouring cells and work out the next state of each cell
         for( int y = 1; y < load + 1; y++ ) {              // for every row excluding edge rows
             for( int p = 0; p < NPKT; p++ ) {             // for every packet in the row
@@ -473,8 +473,8 @@ int main(void) {
   par {
     on tile[0] : i2c_master(i2c, 1, p_scl, p_sda, 10);              //server thread providing orientation data
     on tile[0] : orientation(i2c[0],c_control);                     //client thread reading orientation data
-    on tile[0] : DataInStream("64x64.pgm", c_inIO);                  //thread to read in a PGM image
-    on tile[0] : DataOutStream("64x64out.pgm", c_outIO);             //thread to write out a PGM image
+    on tile[0] : DataInStream("512x512.pgm", c_inIO);                  //thread to read in a PGM image
+    on tile[0] : DataOutStream("512x512out.pgm", c_outIO);             //thread to write out a PGM image
     on tile[0] : distributor(c_inIO, c_outIO, c_control, WtoD, reqTime);     //thread to coordinate work on image
     on tile[0] : checkTime(reqTime);
     //initialise workers

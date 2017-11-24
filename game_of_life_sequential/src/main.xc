@@ -70,33 +70,34 @@ void checkTime(chanend req, chanend pause) {
     int paused = 0;
 
     // receive signal to start timing
-    req :> int x;
+    req :> uchar x;
     t :> prev;
     //printf("Timer starting\n");
 
     while (1) {
-
         // Timer isn't paused so increment and wait for output request
         while (!paused){
+
             [[ordered]]
             select {
-                case req :> int x: // check to see if distributer wants the time
+                case req :> uchar x: // check to see if distributer wants the time
                     req <: timeTaken;
                     //printf("Timer terminated\n");
                     return;
                     break;
-                case pause :> int x: // check to see if board is tilted and timing should pause.
+                case pause :> uchar x: // check to see if board is tilted and timing should pause.
                     paused = 1;
+                    req <: timeTaken;
                     printf("Timer paused\n");
                     break;
                 default:
                     t :> curr;
 
                     // increment change in time
-                    timeTaken += (curr - prev) / 100000;
+                    timeTaken += curr / 100000;
+                    timeTaken -=  prev / 100000;
                     // if overflow is hit, curr is 42950 too small. Compensate.
                     if (prev > curr) timeTaken += 42950;
-
                     prev = curr;
                     break;
             }
@@ -104,9 +105,10 @@ void checkTime(chanend req, chanend pause) {
 
         // Timer is paused, wait for permission to unpause
         select {
-            case pause :> int x:
+            case pause :> uchar x:
             paused = 0;
             t :> prev;
+            req <: (uchar) 0;
             printf("Timer unpaused\n");
             break;
         }
@@ -207,15 +209,14 @@ int getNeighbours(int x, int y, uchar rowVal[NPKT][IMHT]) {
 /////////////////////////////////////////////////////////////////////////////////////////
 void distributor(chanend c_in, chanend c_out, chanend c_control, in port b, out port LEDs, chanend reqTime) {
 
-  timer w;
-  int waitTime = 0;
-
   uint32_t timeTaken;       // time taken to process image
   int button = 0;           // button input from board/button listener
+  uchar flashState = 0;     // state of flashing seperate green LED
 
-  uchar val[NPKT][IMHT]; //To store snapshot of current image
+  uchar val[NPKT][IMHT];    //To store snapshot of current image
   uchar newVal[NPKT][IMHT]; //To store new snapshot of image
-  int i = 0; //Counter for the iterations
+  int i = 0;                //Counter for the iterations
+  int numAlive = 0;         // number of alive workers at current iteration
 
   //Starting up and wait for tilting of the xCore-200 Explorer
   printf( "ProcessImage: Start, size = %dx%d\n", IMHT, IMWD );
@@ -236,68 +237,86 @@ void distributor(chanend c_in, chanend c_out, chanend c_control, in port b, out 
       }
   }
 
-  reqTime <: 1; //trigger timer funtion
+  reqTime <: (uchar) 1; //trigger timer funtion
 
-  // loop whilst sw2 hasn't been pressed
+  // loop whilst SW2 hasn't been pressed
   while (button != 13) {
-      // read button input, if any
-      b :> button;
+      select {
+          case reqTime :> uint32_t timeTaken:
+                LEDs <: (uchar) 8;
+                printf("Status Report:\n "
+                        "Number of rounds processed: %d\n "
+                        "Current number of live cells: %d\n "
+                        "Processing time elapsed: %d\n", i, numAlive, timeTaken);
+                // wait until unpause
+                reqTime :> uchar resume;
+                break;
+          default:
+                // read button input, if any
+                b :> button;
 
-      //flash processing sperate green LED
-      LEDs <: 1;
-      w :> waitTime;                        //read current timer value
-      waitTime += 100000;                 //set waitTime to 1ms after value
-      w when timerafter(waitTime) :> void;  //wait until waitTime is reached
-      LEDs <: 0;
+                // reset alive cell counter
+                numAlive = 0;
 
-      for( int y = 0; y < IMHT; y++ ) {   //go through all lines
-         for( int p = 0; p < NPKT; p++ ) { //go through each packet per line
-             // packet for new cell values, start with all alive
-             uchar newP = 0xFF;
-             for ( int x = 0; x < 8; x++ ) { // go through each pixel in the packet
+                // flash processing LED via state change
+                flashState = (1 ^ flashState);
+                LEDs <: flashState;
 
-                 // get number of alive neighbours
-                 int alive = getNeighbours(x + p*8, y, val);
+                for( int y = 0; y < IMHT; y++ ) {   //go through all lines
+                   for( int p = 0; p < NPKT; p++ ) { //go through each packet per line
+                       // packet for new cell values, start with all alive
+                       uchar newP = 0xFF;
+                       numAlive = numAlive + 8;
+                       for ( int x = 0; x < 8; x++ ) { // go through each pixel in the packet
 
-                 // If currently alive
-                 if (unpack(x, val[p][y]) == 1) {
-                     // If number of alive neighbours isn't two or three, die. Else stay alive by default
-                     if (alive != 2 && alive != 3)
-                         newP = pack(x, newP, 0x0);
+                           // get number of alive neighbours
+                           int alive = getNeighbours(x + p*8, y, val);
+
+                           // If currently alive
+                           if (unpack(x, val[p][y]) == 1) {
+                               // If number of alive neighbours isn't two or three, die. Else stay alive by default
+                               if (alive != 2 && alive != 3){
+                                   newP = pack(x, newP, 0x0);
+                                   numAlive--;
+                               }
+                           }
+                           // Else cell is currently dead: if not exactly three alive neighbours stay dead
+                           else if (alive != 3){
+                               newP = pack(x, newP, 0x0);
+                               numAlive--;
+                           }
+                       }
+                       newVal[p][y] = newP;
+                   }
                  }
-                 // Else cell is currently dead: if not exactly three alive neighbours stay dead
-                 else if (alive != 3)
-                     newP = pack(x, newP, 0x0);
-             }
-             newVal[p][y] = newP;
-         }
-       }
 
-      for( int y = 0; y < IMHT; y++ ) {   //go through all lines
-          for( int p = 0; p < NPKT; p++ ) { //go through each pixel per line
-            val[p][y] = newVal[p][y];                   //transfer new pixels to old array
+                for( int y = 0; y < IMHT; y++ ) {   //go through all lines
+                    for( int p = 0; p < NPKT; p++ ) { //go through each pixel per line
+                      val[p][y] = newVal[p][y];                   //transfer new pixels to old array
+                    }
+                }
+                //printf( "\nOne processing round completed...\n" );
+
+                //Increment iteration
+                i++;
+                break;
+            }
+      }
+
+      reqTime <: (uchar) 0; // inform timer that it wants a return for time
+      reqTime :> timeTaken; // store returned time
+
+      printf("Processing: Complete in %dms\n", timeTaken);
+
+      LEDs <: 2; // send blue LED to be lit
+
+      // Send processed data to DataOutStream
+      for(int y = 0; y < IMHT; y++ ) {
+          for( int p = 0; p < NPKT; p++ ) { // for every packet
+              c_out <: newVal[p][y];           // send cell information to DataOutStream
           }
       }
-      //printf( "\nOne processing round completed...\n" );
-
-      //Increment iteration
-      i++;
-  }
-
-  reqTime <: 0; // inform timer that it wants a return for time
-  reqTime :> timeTaken; // store returned time
-
-  printf("Processing: Complete in %dms\n", timeTaken);
-
-  LEDs <: 2; // send blue LED to be lit
-
-  // Send processed data to DataOutStream
-  for(int y = 0; y < IMHT; y++ ) {
-      for( int p = 0; p < NPKT; p++ ) { // for every packet
-          c_out <: newVal[p][y];           // send cell information to DataOutStream
-      }
-  }
-  LEDs <: 0; // send blue LED to be lit
+      LEDs <: 0; // send blue LED to be lit
 }
 
 /////////////////////////////////////////////////////////////////////////////////////////
@@ -380,19 +399,18 @@ void orientation( client interface i2c_master_if i2c, chanend toDist, chanend to
 
     //get new x-axis tilt value
     int x = read_acceleration(i2c, FXOS8700EQ_OUT_X_MSB);
-
     //pause / unpause distributer and timer when tilted / untilted
     if (!tilted) {
         if (x>30) {
             tilted = 1;
             //toDist <: 1;
-            toTimer <: 1;
+            toTimer <: (uchar) 1;
         }
     }
     else if (x<10) {
         tilted = 0;
         //toDist <: 0;
-        toTimer <: 0;
+        toTimer <: (uchar) 0;
     }
   }
 }

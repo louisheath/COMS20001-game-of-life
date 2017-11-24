@@ -6,7 +6,7 @@
 <fDef name="_safe_memset" global="true" noreturn="false" doNotSpecialize="true" numParams="3"/>
 <fDef name="ack_read_request" global="true" interface="i2c_slave_callback_if" noreturn="false" doNotSpecialize="false" numParams="0"/>
 <fDef name="ack_write_request" global="true" interface="i2c_slave_callback_if" noreturn="false" doNotSpecialize="false" numParams="0"/>
-<fDef name="checkTime" global="true" noreturn="true" doNotSpecialize="false" numParams="1"/>
+<fDef name="checkTime" global="true" noreturn="false" doNotSpecialize="false" numParams="2"/>
 <fDef name="delay_microseconds" global="true" noreturn="false" doNotSpecialize="true" numParams="1"/>
 <fDef name="delay_milliseconds" global="true" noreturn="false" doNotSpecialize="true" numParams="1"/>
 <fDef name="delay_seconds" global="true" noreturn="false" doNotSpecialize="true" numParams="1"/>
@@ -20,7 +20,7 @@
 <fDef name="mod" global="true" noreturn="false" doNotSpecialize="false" numParams="2"/>
 <fDef name="modn" global="true" noreturn="false" doNotSpecialize="false" numParams="2"/>
 <fDef name="operation_complete" global="true" interface="i2c_master_async_if" noreturn="false" doNotSpecialize="false" numParams="0"/>
-<fDef name="orientation" global="true" noreturn="true" doNotSpecialize="false" numParams="2"/>
+<fDef name="orientation" global="true" noreturn="true" doNotSpecialize="false" numParams="3"/>
 <fDef name="pack" global="true" noreturn="false" doNotSpecialize="false" numParams="3"/>
 <fDef name="read" global="true" interface="i2c_master_async_if" noreturn="false" doNotSpecialize="false" numParams="3"/>
 <fDef name="read" global="true" interface="i2c_master_if" noreturn="false" doNotSpecialize="false" numParams="4"/>
@@ -454,6 +454,20 @@
     </values>
   </arg>
 </fCall>
+<fCall name="printf" global="true" numArgs="1">
+  <arg num="0">
+    <values>
+      <value type="unknown"/>
+    </values>
+  </arg>
+</fCall>
+<fCall name="printf" global="true" numArgs="1">
+  <arg num="0">
+    <values>
+      <value type="unknown"/>
+    </values>
+  </arg>
+</fCall>
 <fCall name="_openinpgm" global="true" numArgs="3">
   <arg num="0">
     <values>
@@ -624,13 +638,23 @@
     </values>
   </arg>
 </fCall>
-<fCall name="__builtin_timer_after" global="true" numArgs="2">
+<fCall name="printf" global="true" numArgs="4">
   <arg num="0">
     <values>
       <value type="unknown"/>
     </values>
   </arg>
   <arg num="1">
+    <values>
+      <value type="unknown"/>
+    </values>
+  </arg>
+  <arg num="2">
+    <values>
+      <value type="unknown"/>
+    </values>
+  </arg>
+  <arg num="3">
     <values>
       <value type="unknown"/>
     </values>
@@ -899,13 +923,18 @@
     </values>
   </arg>
 </fCall>
-<fCall name="orientation" global="true" numArgs="2" impId="1">
+<fCall name="orientation" global="true" numArgs="3" impId="1">
   <arg num="0">
     <values>
       <value type="interface"><interfaceInfo index="0" type="dist" func="i2c_master" global="true" impUnit="../src/main.xc" impId="0" param="0"/></value>
     </values>
   </arg>
   <arg num="1">
+    <values>
+      <value type="unknown"/>
+    </values>
+  </arg>
+  <arg num="2">
     <values>
       <value type="unknown"/>
     </values>
@@ -967,8 +996,13 @@
     </values>
   </arg>
 </fCall>
-<fCall name="checkTime" global="true" numArgs="1" impId="5">
+<fCall name="checkTime" global="true" numArgs="2" impId="5">
   <arg num="0">
+    <values>
+      <value type="unknown"/>
+    </values>
+  </arg>
+  <arg num="1">
     <values>
       <value type="unknown"/>
     </values>

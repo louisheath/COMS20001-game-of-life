@@ -59,35 +59,56 @@ int unpack(int index, uchar byte) {             // unpack bit from index 'index'
     return (byte >> index) & 1;
 }
 
-void checkTime(chanend reqTime) {
-    //global timer variables
+void checkTime(chanend req, chanend pause) {
+    // timer variables. timer ticks at 100MHz, 100000 ticks is 1ms.
     timer t;
-    uint32_t start = 0;
-    uint32_t prev = 0;
-    uint32_t curr = 0;
-    uint32_t timeTaken = 0;
+    uint32_t prev,
+             curr;
+    uint32_t timeTaken = 0;     // total time in milliseconds
 
-    int run = 0;
+    // variable for identifying whether game is paused
+    int paused = 0;
 
-    reqTime :> run;
-    t :> start;
+    // receive signal to start timing
+    req :> int x;
+    t :> prev;
+    //printf("Timer starting\n");
 
-    //if timer has maxed out then add a whole cycle (2^32 - 1 ticks)
-    while (1){
-        [[ordered]]
+    while (1) {
+
+        // Timer isn't paused so increment and wait for output request
+        while (!paused){
+            [[ordered]]
+            select {
+                case req :> int x: // check to see if distributer wants the time
+                    req <: timeTaken;
+                    //printf("Timer terminated\n");
+                    return;
+                    break;
+                case pause :> int x: // check to see if board is tilted and timing should pause.
+                    paused = 1;
+                    printf("Timer paused\n");
+                    break;
+                default:
+                    t :> curr;
+
+                    // increment change in time
+                    timeTaken += (curr - prev) / 100000;
+                    // if overflow is hit, curr is 42950 too small. Compensate.
+                    if (prev > curr) timeTaken += 42950;
+
+                    prev = curr;
+                    break;
+            }
+        }
+
+        // Timer is paused, wait for permission to unpause
         select {
-            case reqTime :> int x:
-                t:> curr;
-                timeTaken += ((curr - start) / 100000);
-                reqTime <: timeTaken;
-                break;
-            default:
-                t :> curr;
-                if (prev > curr){
-                    timeTaken += 42950;
-                }
-                prev = curr;
-                break;
+            case pause :> int x:
+            paused = 0;
+            t :> prev;
+            printf("Timer unpaused\n");
+            break;
         }
     }
 }
@@ -332,7 +353,7 @@ void DataOutStream(char outfname[], chanend c_in)
 // the current number of live cells and the processing time elapsed after finishing image read-in
 //
 /////////////////////////////////////////////////////////////////////////////////////////
-void orientation( client interface i2c_master_if i2c, chanend toDist) {
+void orientation( client interface i2c_master_if i2c, chanend toDist, chanend toTimer) {
   i2c_regop_res_t result;
   char status_data = 0;
   int tilted = 0;
@@ -360,16 +381,18 @@ void orientation( client interface i2c_master_if i2c, chanend toDist) {
     //get new x-axis tilt value
     int x = read_acceleration(i2c, FXOS8700EQ_OUT_X_MSB);
 
-    //send signal to distributor after first tilt
+    //pause / unpause distributer and timer when tilted / untilted
     if (!tilted) {
         if (x>30) {
             tilted = 1;
-            toDist <: 1;
+            //toDist <: 1;
+            toTimer <: 1;
         }
     }
     else if (x<10) {
         tilted = 0;
-        toDist <: 0;
+        //toDist <: 0;
+        toTimer <: 0;
     }
   }
 }
@@ -388,15 +411,16 @@ int main(void) {
     chan c_inIO,        // DataStreamIn
          c_outIO,       // DataStreamOut
          c_control,     // Orientation sensor
-         reqTime;       // Request time
+         reqTime,       // Request time
+         pauseTime;     // Orientation to Timer pause signal
 
     par {
         i2c_master(i2c, 1, p_scl, p_sda, 10);               //server thread providing orientation data
-        orientation(i2c[0],c_control);                      //client thread reading orientation data
+        orientation(i2c[0],c_control, pauseTime);           //client thread reading orientation data
         DataInStream(infname, c_inIO);                      //thread to read in a PGM image
         DataOutStream(outfname, c_outIO);                   //thread to write out a PGM image
         distributor(c_inIO, c_outIO, c_control, buttons, leds, reqTime);   //thread to coordinate work on image
-        checkTime(reqTime);
+        checkTime(reqTime, pauseTime);
     }
 
     return 0;

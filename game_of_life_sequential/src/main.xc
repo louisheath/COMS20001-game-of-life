@@ -36,11 +36,8 @@ out port leds = XS1_PORT_4F;   //port to access xCore-200 LEDs
 
 // modulo function that works with negatives
 int mod(int n,int x) {
-  while (x < 0  || x > (n-1)) {
-    if (x < 0) x += n;
-    else x -= n;
-  }
-  return x;
+    while (x < 0) x += n;
+    return (x % n);
 }
 
 uchar pack(int index, uchar byte, uchar c) {    // pack c into packet 'byte' at index 'index'
@@ -59,6 +56,7 @@ int unpack(int index, uchar byte) {             // unpack bit from index 'index'
     return (byte >> index) & 1;
 }
 
+// function that constantly tracks processing time and checks for clock overflow
 void checkTime(chanend req, chanend pause) {
     // timer variables. timer ticks at 100MHz, 100000 ticks is 1ms.
     timer t;
@@ -80,14 +78,14 @@ void checkTime(chanend req, chanend pause) {
 
             [[ordered]]
             select {
-                case req :> uchar x: // check to see if distributer wants the time
+                case req :> uchar x:    // check to see if distributer wants the time
                     req <: timeTaken;
                     //printf("Timer terminated\n");
                     return;
                     break;
-                case pause :> uchar x: // check to see if board is tilted and timing should pause.
+                case pause :> uchar x:  // check to see if board is tilted and timing should pause.
                     paused = 1;
-                    req <: timeTaken;
+                    req <: timeTaken;   // tell distributer to pause
                     printf("Timer paused\n");
                     break;
                 default:
@@ -108,13 +106,12 @@ void checkTime(chanend req, chanend pause) {
             case pause :> uchar x:
             paused = 0;
             t :> prev;
-            req <: (uchar) 0;
+            req <: (uchar) 0;   // tell distributer to unpause
             printf("Timer unpaused\n");
             break;
         }
     }
 }
-
 
 /////////////////////////////////////////////////////////////////////////////////////////
 //
@@ -123,23 +120,23 @@ void checkTime(chanend req, chanend pause) {
 /////////////////////////////////////////////////////////////////////////////////////////
 void DataInStream(char infname[], chanend c_out)
 {
-  int res;
-  uchar line[ IMWD ];
-  printf( "DataInStream: Start...\n" );
+    int res;
+    uchar line[ IMWD ];
+    printf( "DataInStream: Start...\n" );
 
-  //Open PGM file
-  res = _openinpgm( infname, IMWD, IMHT );
-  if( res ) {
-    printf( "DataInStream: Error openening %s\n.", infname );
-    return;
-  }
+    //Open PGM file
+    res = _openinpgm( infname, IMWD, IMHT );
+    if( res ) {
+        printf( "DataInStream: Error openening %s\n.", infname );
+        return;
+    }
 
-  //Read image line-by-line and send byte by byte to channel c_out
+    //Read image line-by-line and send byte by byte to channel c_out
     for( int y = 0; y < IMHT; y++ ) {
       _readinline( line, IMWD );
 
       uchar packet = 0x00;
-      for ( int p = 0; p < NPKT; p++) {         // for every packet we can fit in the row
+      for ( int p = 0; p < NPKT; p++) {           // for every packet we can fit in the row
           for ( int x = 0; x < 8; x++) {          // for each of the eight bits to be packed
               packet = pack(x, packet, line[x + p*8]);
               //printf( "-%4.1d ", line[p*8 + x] ); //show image values
@@ -150,22 +147,16 @@ void DataInStream(char infname[], chanend c_out)
       //printf("\n")
     }
 
-  //Close PGM image file
-  _closeinpgm();
+    //Close PGM image file
+    _closeinpgm();
 
-  printf("DataInStream: Complete\n");
-  return;
+    printf("DataInStream: Complete\n");
+    return;
 }
 
-//mod by n
-int modn(int n, int x){
-  while (x < 0 || x > (n - 1)){
-      if (x < 0) x += n;
-      else x -= n;
-  }
-  return x;
-}
-
+/*
+ * We need to ask Tilo if this array parameter is copying the array every time, and if so how to point
+ */
 int getNeighbours(int x, int y, uchar rowVal[NPKT][IMHT]) {
     // variables used in finding neighbours
     int xRight  = mod(IMWD, x+1);
@@ -207,51 +198,57 @@ int getNeighbours(int x, int y, uchar rowVal[NPKT][IMHT]) {
 // Currently the function just inverts the image
 //
 /////////////////////////////////////////////////////////////////////////////////////////
-void distributor(chanend c_in, chanend c_out, chanend c_control, in port b, out port LEDs, chanend reqTime) {
+void distributor(chanend c_in, chanend c_out, in port b, out port LEDs, chanend reqTime) {
 
-  uint32_t timeTaken;       // time taken to process image
-  int button = 0;           // button input from board/button listener
-  uchar flashState = 0;     // state of flashing seperate green LED
+    // variables for hardware control
+    int button = 0;           // button input from board/button listener
+    uchar flashState = 0;     // state of flashing seperate green LED
 
-  uchar val[NPKT][IMHT];    //To store snapshot of current image
-  uchar newVal[NPKT][IMHT]; //To store new snapshot of image
-  int i = 0;                //Counter for the iterations
-  int numAlive = 0;         // number of alive workers at current iteration
+    // game states before and after processing
+    uchar val[NPKT][IMHT];
+    uchar newVal[NPKT][IMHT];
 
-  //Starting up and wait for tilting of the xCore-200 Explorer
-  printf( "ProcessImage: Start, size = %dx%d\n", IMHT, IMWD );
-  printf( "Waiting for start button...\n" );
+    // variables for output when paused
+    uint32_t timeTaken;       // time taken to process image
+    int i = 0;                // iteration counter
+    int numAlive = 0;         // number of alive workers at current iteration
 
-  // wait for SW1 button input
-  while (button != 14) {
-      b :> button;
-  }
+    // prompt user for start button
+    printf( "ProcessImage: Start, size = %dx%d\n", IMHT, IMWD );
+    printf( "Waiting for start button...\n" );
 
-  LEDs <: 4; // send green LED to be lit
+    // wait for SW1 button input
+    while (button != 14) {
+        b :> button;
+    }
 
-  printf( "Processing...\n" );
+    LEDs <: 4; // send green LED to be lit
 
-  for(int y = 0; y < IMHT; y++ ) {       // Read every packet into world array
-      for( int p = 0; p < NPKT; p++ ) {
-         c_in :> val[p][y];
-      }
-  }
+    printf( "Processing...\n" );
 
-  reqTime <: (uchar) 1; //trigger timer funtion
+    // Read input from DataInStream
+    for(int y = 0; y < IMHT; y++ ) {
+        for( int p = 0; p < NPKT; p++ ) {
+            c_in :> val[p][y];
+        }
+    }
 
-  // loop whilst SW2 hasn't been pressed
-  while (button != 13) {
-      select {
-          case reqTime :> uint32_t timeTaken:
+    // Start timing
+    reqTime <: (uchar) 1;
+
+    // loop whilst SW2 hasn't been pressed
+    while (button != 13) {
+        select {
+            case reqTime :> timeTaken:
                 LEDs <: (uchar) 8;
-                printf("Status Report:\n "
-                        "Number of rounds processed: %d\n "
-                        "Current number of live cells: %d\n "
-                        "Processing time elapsed: %d\n", i, numAlive, timeTaken);
+                printf("Status Report:\n"
+                       " Number of rounds processed: %d\n"
+                       " Current number of live cells: %d\n"
+                       " Processing time elapsed: %d\n", i, numAlive, timeTaken);
                 // wait until unpause
                 reqTime :> uchar resume;
                 break;
-          default:
+            default:
                 // read button input, if any
                 b :> button;
 
@@ -259,36 +256,37 @@ void distributor(chanend c_in, chanend c_out, chanend c_control, in port b, out 
                 numAlive = 0;
 
                 // flash processing LED via state change
-                flashState = (1 ^ flashState);
+                flashState ^= 1;
                 LEDs <: flashState;
 
                 for( int y = 0; y < IMHT; y++ ) {   //go through all lines
-                   for( int p = 0; p < NPKT; p++ ) { //go through each packet per line
-                       // packet for new cell values, start with all alive
-                       uchar newP = 0xFF;
-                       numAlive = numAlive + 8;
-                       for ( int x = 0; x < 8; x++ ) { // go through each pixel in the packet
+                    for( int p = 0; p < NPKT; p++ ) { //go through each packet per line
+                        // packet for new cell values, assume all eight alive to start
+                        uchar newP = 0xFF;
+                        numAlive += 8;
 
-                           // get number of alive neighbours
-                           int alive = getNeighbours(x + p*8, y, val);
+                        for ( int x = 0; x < 8; x++ ) { // go through each pixel in the packet
 
-                           // If currently alive
-                           if (unpack(x, val[p][y]) == 1) {
-                               // If number of alive neighbours isn't two or three, die. Else stay alive by default
-                               if (alive != 2 && alive != 3){
+                            // get number of alive neighbours
+                            int alive = getNeighbours(x + p*8, y, val);
+
+                            // If currently alive
+                            if (unpack(x, val[p][y]) == 1) {
+                                // If number of alive neighbours isn't two or three, die. Else stay alive by default
+                                if (alive != 2 && alive != 3){
                                    newP = pack(x, newP, 0x0);
                                    numAlive--;
-                               }
-                           }
-                           // Else cell is currently dead: if not exactly three alive neighbours stay dead
-                           else if (alive != 3){
+                                }
+                            }
+                            // Else cell is currently dead: if not exactly three alive neighbours stay dead
+                            else if (alive != 3){
                                newP = pack(x, newP, 0x0);
                                numAlive--;
-                           }
-                       }
-                       newVal[p][y] = newP;
-                   }
-                 }
+                            }
+                        }
+                        newVal[p][y] = newP;
+                    }
+                }
 
                 for( int y = 0; y < IMHT; y++ ) {   //go through all lines
                     for( int p = 0; p < NPKT; p++ ) { //go through each pixel per line
@@ -300,23 +298,32 @@ void distributor(chanend c_in, chanend c_out, chanend c_control, in port b, out 
                 //Increment iteration
                 i++;
                 break;
-            }
-      }
+        }
+    }
 
-      reqTime <: (uchar) 0; // inform timer that it wants a return for time
-      reqTime :> timeTaken; // store returned time
+    /* SW2 pressed, end game and produce output */
 
-      printf("Processing: Complete in %dms\n", timeTaken);
+    /*
+     *
+     * Do we actually want to end the program on output? Or output and continue running?
+     *
+     * We could always resume the timer and loop back up ..
+     */
 
-      LEDs <: 2; // send blue LED to be lit
+    reqTime <: (uchar) 0; // inform timer that it wants a return for time
+    reqTime :> timeTaken; // store returned time
 
-      // Send processed data to DataOutStream
-      for(int y = 0; y < IMHT; y++ ) {
-          for( int p = 0; p < NPKT; p++ ) { // for every packet
-              c_out <: newVal[p][y];           // send cell information to DataOutStream
-          }
-      }
-      LEDs <: 0; // send blue LED to be lit
+    printf("Processing: Complete in %dms\n", timeTaken);
+
+    LEDs <: 2; // send blue LED to be lit
+
+    // Send processed data to DataOutStream
+    for(int y = 0; y < IMHT; y++ ) {
+        for( int p = 0; p < NPKT; p++ ) { // for every packet
+            c_out <: newVal[p][y];           // send cell information to DataOutStream
+        }
+    }
+    LEDs <: 0; // turn off blue LED
 }
 
 /////////////////////////////////////////////////////////////////////////////////////////
@@ -326,40 +333,40 @@ void distributor(chanend c_in, chanend c_out, chanend c_control, in port b, out 
 /////////////////////////////////////////////////////////////////////////////////////////
 void DataOutStream(char outfname[], chanend c_in)
 {
-  int res;
-  uchar line[ IMWD ];
+    int res;
+    uchar line[ IMWD ];
 
-  //Open PGM file
-  printf( "DataOutStream: Start...\n" );
+    //Open PGM file
+    printf( "DataOutStream: Start...\n" );
 
-  res = _openoutpgm( outfname, IMWD, IMHT );
-  if( res ) {
-    printf( "DataOutStream: Error opening %s\n.", outfname );
-    return;
-  }
-  //Compile each line of the image and write the image line-by-line
-  for( int y = 0; y < IMHT; y++ ) {
-    for( int p = 0; p < NPKT; p++ ) {
-      uchar packet;
-      c_in :> packet;
+    res = _openoutpgm( outfname, IMWD, IMHT );
+    if( res ) {
+        printf( "DataOutStream: Error opening %s\n.", outfname );
+        return;
+    }
+    //Compile each line of the image and write the image line-by-line
+    for( int y = 0; y < IMHT; y++ ) {
+        for( int p = 0; p < NPKT; p++ ) {
+            uchar packet;
+            c_in :> packet;
 
-      // unpack each bit and add to output line
-      for ( int x = 0; x < 8; x++ ) {
-          line[p*8 + x] = unpack(x, packet);
-          //printf( "-%4.1d", line[p*8 + x]); //show image values
-      }
+            // unpack each bit and add to output line
+            for ( int x = 0; x < 8; x++ ) {
+              line[p*8 + x] = unpack(x, packet);
+              //printf( "-%4.1d", line[p*8 + x]); //show image values
+          }
     }
     //printf( "\n" );
     _writeoutline( line, IMWD );
     //printf( "DataOutStream: Line written...\n" );
-  }
+    }
 
-  //Close the PGM image
-  _closeoutpgm();
+    //Close the PGM image
+    _closeoutpgm();
 
-  printf( "DataOutStream: Complete\n");
+    printf( "DataOutStream: Complete\n");
 
-  return;
+    return;
 }
 
 /////////////////////////////////////////////////////////////////////////////////////////
@@ -372,7 +379,7 @@ void DataOutStream(char outfname[], chanend c_in)
 // the current number of live cells and the processing time elapsed after finishing image read-in
 //
 /////////////////////////////////////////////////////////////////////////////////////////
-void orientation( client interface i2c_master_if i2c, chanend toDist, chanend toTimer) {
+void orientation( client interface i2c_master_if i2c, chanend toTimer) {
   i2c_regop_res_t result;
   char status_data = 0;
   int tilted = 0;
@@ -403,13 +410,11 @@ void orientation( client interface i2c_master_if i2c, chanend toDist, chanend to
     if (!tilted) {
         if (x>30) {
             tilted = 1;
-            //toDist <: 1;
             toTimer <: (uchar) 1;
         }
     }
     else if (x<10) {
         tilted = 0;
-        //toDist <: 0;
         toTimer <: (uchar) 0;
     }
   }
@@ -428,16 +433,15 @@ int main(void) {
     char outfname[] = "64x64out.pgm"; //put your output image path here
     chan c_inIO,        // DataStreamIn
          c_outIO,       // DataStreamOut
-         c_control,     // Orientation sensor
          reqTime,       // Request time
          pauseTime;     // Orientation to Timer pause signal
 
     par {
-        i2c_master(i2c, 1, p_scl, p_sda, 10);               //server thread providing orientation data
-        orientation(i2c[0],c_control, pauseTime);           //client thread reading orientation data
-        DataInStream(infname, c_inIO);                      //thread to read in a PGM image
-        DataOutStream(outfname, c_outIO);                   //thread to write out a PGM image
-        distributor(c_inIO, c_outIO, c_control, buttons, leds, reqTime);   //thread to coordinate work on image
+        i2c_master(i2c, 1, p_scl, p_sda, 10);                   //server thread providing orientation data
+        orientation(i2c[0], pauseTime);                         //client thread reading orientation data
+        DataInStream(infname, c_inIO);                          //thread to read in a PGM image
+        DataOutStream(outfname, c_outIO);                       //thread to write out a PGM image
+        distributor(c_inIO, c_outIO, buttons, leds, reqTime);   //thread to coordinate work on image
         checkTime(reqTime, pauseTime);
     }
 

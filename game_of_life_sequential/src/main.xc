@@ -7,8 +7,8 @@
 #include "pgmIO.h"
 #include "i2c.h"
 
-#define  IMHT 64                  //image height
-#define  IMWD 64                  //image width
+#define  IMHT 16                  //image height
+#define  IMWD 16                  //image width
 #define  NPKT IMWD/8              //number of packets in a row
 
 typedef unsigned char uchar;      //using uchar as shorthand
@@ -42,12 +42,10 @@ int mod(int n,int x) {
 
 uchar pack(int index, uchar byte, uchar c) {    // pack c into packet 'byte' at index 'index'
     if (c == 0x0) {
-        byte = byte & ~(1 << index);
-        index++;
+        byte &= ~(1 << index);
     }
     else if (c == 0xFF) {
-        byte = byte | (1 << index);
-        index++;
+        byte |= (1 << index);
     }
     return byte;
 }
@@ -79,14 +77,17 @@ void checkTime(chanend req, chanend pause) {
             [[ordered]]
             select {
                 case req :> uchar x:    // check to see if distributer wants the time
-                    req <: timeTaken;
-                    //printf("Timer terminated\n");
-                    return;
+                    if (x == 1) {
+                        req <: timeTaken;
+                        paused = 1;     // pause while distributer outputs
+                    }
                     break;
                 case pause :> uchar x:  // check to see if board is tilted and timing should pause.
-                    paused = 1;
-                    req <: timeTaken;   // tell distributer to pause
-                    printf("Timer paused\n");
+                    if (x == 1) {
+                        paused = 1;
+                        req <: timeTaken;   // tell distributer to pause
+                        printf("Timer paused\n");
+                    }
                     break;
                 default:
                     t :> curr;
@@ -103,12 +104,21 @@ void checkTime(chanend req, chanend pause) {
 
         // Timer is paused, wait for permission to unpause
         select {
-            case pause :> uchar x:
-            paused = 0;
-            t :> prev;
-            req <: (uchar) 0;   // tell distributer to unpause
-            printf("Timer unpaused\n");
-            break;
+            case pause :> uchar x:  // if board is untilted
+                if (x == 0) {
+                    paused = 0;
+                    t :> prev;
+                    req <: (uchar) 0;   // tell distributer to unpause
+                    printf("Timer unpaused by tilt\n");
+                }
+                break;
+            case req :> uchar x:    // if distributer has finished outputting and wants to resume
+                if (x == 0) {
+                    paused = 0;
+                    t :> prev;
+                    printf("Timer unpaused by dist\n");
+                }
+                break;
         }
     }
 }
@@ -217,6 +227,7 @@ void distributor(chanend c_in, chanend c_out, in port b, out port LEDs, chanend 
     printf( "ProcessImage: Start, size = %dx%d\n", IMHT, IMWD );
     printf( "Waiting for start button...\n" );
 
+
     // wait for SW1 button input
     while (button != 14) {
         b :> button;
@@ -234,96 +245,100 @@ void distributor(chanend c_in, chanend c_out, in port b, out port LEDs, chanend 
     }
 
     // Start timing
-    reqTime <: (uchar) 1;
+    reqTime <: (uchar) 0;
 
-    // loop whilst SW2 hasn't been pressed
-    while (button != 13) {
-        select {
-            case reqTime :> timeTaken:
-                LEDs <: (uchar) 8;
-                printf("Status Report:\n"
-                       " Number of rounds processed: %d\n"
-                       " Current number of live cells: %d\n"
-                       " Processing time elapsed: %d\n", i, numAlive, timeTaken);
-                // wait until unpause
-                reqTime :> uchar resume;
-                break;
-            default:
-                // read button input, if any
-                b :> button;
+    // game runs infinitely
+    while (1) {
 
-                // reset alive cell counter
-                numAlive = 0;
+        // loop whilst SW2 hasn't been pressed
+        while (button != 13) {
+            select {
+                case reqTime :> timeTaken:
+                    LEDs <: (uchar) 8;
+                    printf("Status Report:\n"
+                           " Number of rounds processed: %d\n"
+                           " Current number of live cells: %d\n"
+                           " Processing time elapsed: %d\n", i, numAlive, timeTaken);
+                    // wait until unpause
+                    reqTime :> uchar resume;
+                    break;
+                default:
+                    // read button input, if any
+                    b :> button;
 
-                // flash processing LED via state change
-                flashState ^= 1;
-                LEDs <: flashState;
+                    // reset alive cell counter
+                    numAlive = 0;
 
-                for( int y = 0; y < IMHT; y++ ) {   //go through all lines
-                    for( int p = 0; p < NPKT; p++ ) { //go through each packet per line
-                        // packet for new cell values, assume all eight alive to start
-                        uchar newP = 0xFF;
-                        numAlive += 8;
+                    // flash processing LED via state change
+                    flashState ^= 1;
+                    LEDs <: flashState;
 
-                        for ( int x = 0; x < 8; x++ ) { // go through each pixel in the packet
+                    for( int y = 0; y < IMHT; y++ ) {   //go through all lines
+                        for( int p = 0; p < NPKT; p++ ) { //go through each packet per line
+                            // packet for new cell values, assume all eight alive to start
+                            uchar newP = 0xFF;
+                            numAlive += 8;
 
-                            // get number of alive neighbours
-                            int alive = getNeighbours(x + p*8, y, val);
+                            for ( int x = 0; x < 8; x++ ) { // go through each pixel in the packet
 
-                            // If currently alive
-                            if (unpack(x, val[p][y]) == 1) {
-                                // If number of alive neighbours isn't two or three, die. Else stay alive by default
-                                if (alive != 2 && alive != 3){
+                                // get number of alive neighbours
+                                int alive = getNeighbours(x + p*8, y, val);
+
+                                // If currently alive
+                                if (unpack(x, val[p][y]) == 1) {
+                                    // If number of alive neighbours isn't two or three, die. Else stay alive by default
+                                    if (alive != 2 && alive != 3){
+                                       newP = pack(x, newP, 0x0);
+                                       numAlive--;
+                                    }
+                                }
+                                // Else cell is currently dead: if not exactly three alive neighbours stay dead
+                                else if (alive != 3){
                                    newP = pack(x, newP, 0x0);
                                    numAlive--;
                                 }
                             }
-                            // Else cell is currently dead: if not exactly three alive neighbours stay dead
-                            else if (alive != 3){
-                               newP = pack(x, newP, 0x0);
-                               numAlive--;
-                            }
+                            newVal[p][y] = newP;
                         }
-                        newVal[p][y] = newP;
                     }
-                }
 
-                for( int y = 0; y < IMHT; y++ ) {   //go through all lines
-                    for( int p = 0; p < NPKT; p++ ) { //go through each pixel per line
-                      val[p][y] = newVal[p][y];                   //transfer new pixels to old array
+                    for( int y = 0; y < IMHT; y++ ) {   //go through all lines
+                        for( int p = 0; p < NPKT; p++ ) { //go through each pixel per line
+                          val[p][y] = newVal[p][y];                   //transfer new pixels to old array
+                        }
                     }
-                }
-                //printf( "\nOne processing round completed...\n" );
+                    //printf( "\nOne processing round completed...\n" );
 
-                //Increment iteration
-                i++;
-                break;
+                    //Increment iteration
+                    i++;
+                    break;
+            }
         }
-    }
 
-    /* SW2 pressed, end game and produce output */
+        /* SW2 pressed, produce output */
 
-    /*
-     *
-     * Do we actually want to end the program on output? Or output and continue running?
-     *
-     * We could always resume the timer and loop back up ..
-     */
+        reqTime <: (uchar) 1; // request timeTaken from timer, also pausing it
+        printf("SW2 pressed, asked timer for time and paused it\n");
+        reqTime :> timeTaken; // store returned time
+        printf("Got timeTaken\n");
 
-    reqTime <: (uchar) 0; // inform timer that it wants a return for time
-    reqTime :> timeTaken; // store returned time
+        printf("Processing: Outputting after %dms\n", timeTaken);
 
-    printf("Processing: Complete in %dms\n", timeTaken);
+        LEDs <: 2; // send blue LED to be lit
 
-    LEDs <: 2; // send blue LED to be lit
-
-    // Send processed data to DataOutStream
-    for(int y = 0; y < IMHT; y++ ) {
-        for( int p = 0; p < NPKT; p++ ) { // for every packet
-            c_out <: newVal[p][y];           // send cell information to DataOutStream
+        // Send processed data to DataOutStream
+        for(int y = 0; y < IMHT; y++ ) {
+            for( int p = 0; p < NPKT; p++ ) { // for every packet
+                c_out <: newVal[p][y];           // send cell information to DataOutStream
+            }
         }
+        LEDs <: 0; // turn off blue LED
+
+        printf("Outputted\n");
+
+        reqTime <: (uchar) 0; // unpause the timer after output
+        b :> button;          // get new button status
     }
-    LEDs <: 0; // turn off blue LED
 }
 
 /////////////////////////////////////////////////////////////////////////////////////////
@@ -339,32 +354,34 @@ void DataOutStream(char outfname[], chanend c_in)
     //Open PGM file
     printf( "DataOutStream: Start...\n" );
 
-    res = _openoutpgm( outfname, IMWD, IMHT );
-    if( res ) {
-        printf( "DataOutStream: Error opening %s\n.", outfname );
-        return;
-    }
-    //Compile each line of the image and write the image line-by-line
-    for( int y = 0; y < IMHT; y++ ) {
-        for( int p = 0; p < NPKT; p++ ) {
-            uchar packet;
-            c_in :> packet;
+    while(1) {
+        res = _openoutpgm( outfname, IMWD, IMHT );
+        if( res ) {
+            printf( "DataOutStream: Error opening %s\n.", outfname );
+            return;
+        }
+        //Compile each line of the image and write the image line-by-line
+        for( int y = 0; y < IMHT; y++ ) {
+            for( int p = 0; p < NPKT; p++ ) {
+                uchar packet;
+                c_in :> packet;
 
-            // unpack each bit and add to output line
-            for ( int x = 0; x < 8; x++ ) {
-              line[p*8 + x] = unpack(x, packet);
-              //printf( "-%4.1d", line[p*8 + x]); //show image values
-          }
-    }
-    //printf( "\n" );
-    _writeoutline( line, IMWD );
-    //printf( "DataOutStream: Line written...\n" );
-    }
+                // unpack each bit and add to output line
+                for ( int x = 0; x < 8; x++ ) {
+                  line[p*8 + x] = unpack(x, packet);
+                  //printf( "-%4.1d", line[p*8 + x]); //show image values
+              }
+        }
+        //printf( "\n" );
+        _writeoutline( line, IMWD );
+        //printf( "DataOutStream: Line written...\n" );
+        }
 
-    //Close the PGM image
-    _closeoutpgm();
+        //Close the PGM image
+        _closeoutpgm();
 
-    printf( "DataOutStream: Complete\n");
+        printf( "DataOutStream: Complete\n");
+    }
 
     return;
 }
@@ -429,8 +446,8 @@ int main(void) {
 
     i2c_master_if i2c[1];              //interface to orientation
 
-    char infname[] = "64x64.pgm";     //put your input image path here
-    char outfname[] = "64x64out.pgm"; //put your output image path here
+    char infname[] = "test.pgm";     //put your input image path here
+    char outfname[] = "testout.pgm"; //put your output image path here
     chan c_inIO,        // DataStreamIn
          c_outIO,       // DataStreamOut
          reqTime,       // Request time

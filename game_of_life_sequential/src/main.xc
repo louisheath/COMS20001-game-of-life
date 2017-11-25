@@ -380,44 +380,44 @@ void DataOutStream(char outfname[], chanend c_in)
 //
 /////////////////////////////////////////////////////////////////////////////////////////
 void orientation( client interface i2c_master_if i2c, chanend toTimer) {
-  i2c_regop_res_t result;
-  char status_data = 0;
-  int tilted = 0;
+    i2c_regop_res_t result;
+    char status_data = 0;
+    int tilted = 0;
 
-  // Configure FXOS8700EQ
-  result = i2c.write_reg(FXOS8700EQ_I2C_ADDR, FXOS8700EQ_XYZ_DATA_CFG_REG, 0x01);
-  if (result != I2C_REGOP_SUCCESS) {
-    printf("I2C write reg failed\n");
-  }
-  
-  // Enable FXOS8700EQ
-  result = i2c.write_reg(FXOS8700EQ_I2C_ADDR, FXOS8700EQ_CTRL_REG_1, 0x01);
-  if (result != I2C_REGOP_SUCCESS) {
-    printf("I2C write reg failed\n");
-  }
+    // Configure FXOS8700EQ
+    result = i2c.write_reg(FXOS8700EQ_I2C_ADDR, FXOS8700EQ_XYZ_DATA_CFG_REG, 0x01);
+    if (result != I2C_REGOP_SUCCESS) {
+        printf("I2C write reg failed\n");
+    }
 
-  //Probe the orientation x-axis forever
-  while (1) {
+    // Enable FXOS8700EQ
+    result = i2c.write_reg(FXOS8700EQ_I2C_ADDR, FXOS8700EQ_CTRL_REG_1, 0x01);
+    if (result != I2C_REGOP_SUCCESS) {
+        printf("I2C write reg failed\n");
+    }
 
-    //check until new orientation data is available
-    do {
-        status_data = i2c.read_reg(FXOS8700EQ_I2C_ADDR, FXOS8700EQ_DR_STATUS, result);
-    } while (!status_data & 0x08);
+    //Probe the orientation x-axis forever
+    while (1) {
 
-    //get new x-axis tilt value
-    int x = read_acceleration(i2c, FXOS8700EQ_OUT_X_MSB);
-    //pause / unpause distributer and timer when tilted / untilted
-    if (!tilted) {
-        if (x>30) {
-            tilted = 1;
-            toTimer <: (uchar) 1;
+        //check until new orientation data is available
+        do {
+            status_data = i2c.read_reg(FXOS8700EQ_I2C_ADDR, FXOS8700EQ_DR_STATUS, result);
+        } while (!status_data & 0x08);
+
+        //get new x-axis tilt value
+        int x = read_acceleration(i2c, FXOS8700EQ_OUT_X_MSB);
+        //pause / unpause distributer and timer when tilted / untilted
+        if (!tilted) {
+            if (x>30) {
+                tilted = 1;
+                toTimer <: (uchar) 1;
+            }
+        }
+        else if (x<10) {
+            tilted = 0;
+            toTimer <: (uchar) 0;
         }
     }
-    else if (x<10) {
-        tilted = 0;
-        toTimer <: (uchar) 0;
-    }
-  }
 }
 
 /////////////////////////////////////////////////////////////////////////////////////////

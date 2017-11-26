@@ -7,8 +7,8 @@
 #include "pgmIO.h"
 #include "i2c.h"
 
-#define  IMHT 16                  //image height
-#define  IMWD 16                  //image width
+#define  IMHT 64                  //image height
+#define  IMWD 64                  //image width
 #define  NPKT IMWD/8              //number of packets in a row
 
 typedef unsigned char uchar;      //using uchar as shorthand
@@ -208,7 +208,7 @@ int getNeighbours(int x, int y, uchar rowVal[NPKT][IMHT]) {
 // Currently the function just inverts the image
 //
 /////////////////////////////////////////////////////////////////////////////////////////
-void distributor(chanend c_in, chanend c_out, in port b, out port LEDs, chanend reqTime) {
+void distributor(chanend c_in, chanend c_out, chanend c_control, in port b, out port LEDs, chanend reqTime) {
 
     // variables for hardware control
     int button = 0;           // button input from board/button listener
@@ -244,6 +244,8 @@ void distributor(chanend c_in, chanend c_out, in port b, out port LEDs, chanend 
         }
     }
 
+    // Inform orientation to start detecting tilts
+    c_control <: (uchar) 1;
     // Start timing
     reqTime <: (uchar) 0;
 
@@ -326,6 +328,10 @@ void distributor(chanend c_in, chanend c_out, in port b, out port LEDs, chanend 
 
         LEDs <: 2; // send blue LED to be lit
 
+        // tell DataOutStream to open an output file
+        //   this is necessary to prevent the previous file being corrupted
+        c_out <: (uchar) 1;
+
         // Send processed data to DataOutStream
         for(int y = 0; y < IMHT; y++ ) {
             for( int p = 0; p < NPKT; p++ ) { // for every packet
@@ -355,32 +361,38 @@ void DataOutStream(char outfname[], chanend c_in)
     printf( "DataOutStream: Start...\n" );
 
     while(1) {
-        res = _openoutpgm( outfname, IMWD, IMHT );
-        if( res ) {
-            printf( "DataOutStream: Error opening %s\n.", outfname );
-            return;
-        }
-        //Compile each line of the image and write the image line-by-line
-        for( int y = 0; y < IMHT; y++ ) {
-            for( int p = 0; p < NPKT; p++ ) {
-                uchar packet;
-                c_in :> packet;
+        select {
+            case c_in :> uchar x: // if distributer has a game state for outputting
+                res = _openoutpgm( outfname, IMWD, IMHT );
+                if( res ) {
+                    printf( "DataOutStream: Error opening %s\n.", outfname );
+                    return;
+                }
+                //Compile each line of the image and write the image line-by-line
+                for( int y = 0; y < IMHT; y++ ) {
+                    for( int p = 0; p < NPKT; p++ ) {
+                        uchar packet;
+                        c_in :> packet;
 
-                // unpack each bit and add to output line
-                for ( int x = 0; x < 8; x++ ) {
-                  line[p*8 + x] = unpack(x, packet);
-                  //printf( "-%4.1d", line[p*8 + x]); //show image values
-              }
-        }
-        //printf( "\n" );
-        _writeoutline( line, IMWD );
-        //printf( "DataOutStream: Line written...\n" );
-        }
+                        // unpack each bit and add to output line
+                        for ( int x = 0; x < 8; x++ ) {
+                            int bit = unpack(x, packet);
+                            if (bit) line[p*8 + x] = 0xFF;
+                            else line[p*8 + x] = 0x00;
+                            //printf( "-%4.1d", line[p*8 + x]); //show image values
+                      }
+                }
+                //printf( "\n" );
+                _writeoutline( line, IMWD );
+                //printf( "DataOutStream: Line written...\n" );
+                }
 
-        //Close the PGM image
-        _closeoutpgm();
+                //Close the PGM image
+                _closeoutpgm();
 
-        printf( "DataOutStream: Complete\n");
+                printf( "DataOutStream: Complete\n");
+                break;
+        }
     }
 
     return;
@@ -396,7 +408,7 @@ void DataOutStream(char outfname[], chanend c_in)
 // the current number of live cells and the processing time elapsed after finishing image read-in
 //
 /////////////////////////////////////////////////////////////////////////////////////////
-void orientation( client interface i2c_master_if i2c, chanend toTimer) {
+void orientation( client interface i2c_master_if i2c, chanend dist, chanend toTimer) {
     i2c_regop_res_t result;
     char status_data = 0;
     int tilted = 0;
@@ -412,6 +424,9 @@ void orientation( client interface i2c_master_if i2c, chanend toTimer) {
     if (result != I2C_REGOP_SUCCESS) {
         printf("I2C write reg failed\n");
     }
+
+    // wait for start signal from distributor
+    dist :> uchar x;
 
     //Probe the orientation x-axis forever
     while (1) {
@@ -446,19 +461,20 @@ int main(void) {
 
     i2c_master_if i2c[1];              //interface to orientation
 
-    char infname[] = "test.pgm";     //put your input image path here
-    char outfname[] = "testout.pgm"; //put your output image path here
+    char infname[] = "64x64.pgm";     //put your input image path here
+    char outfname[] = "64x64out.pgm"; //put your output image path here
     chan c_inIO,        // DataStreamIn
          c_outIO,       // DataStreamOut
+         c_control,
          reqTime,       // Request time
          pauseTime;     // Orientation to Timer pause signal
 
     par {
-        i2c_master(i2c, 1, p_scl, p_sda, 10);                   //server thread providing orientation data
-        orientation(i2c[0], pauseTime);                         //client thread reading orientation data
-        DataInStream(infname, c_inIO);                          //thread to read in a PGM image
-        DataOutStream(outfname, c_outIO);                       //thread to write out a PGM image
-        distributor(c_inIO, c_outIO, buttons, leds, reqTime);   //thread to coordinate work on image
+        i2c_master(i2c, 1, p_scl, p_sda, 10);                               //server thread providing orientation data
+        orientation(i2c[0], c_control, pauseTime);                          //client thread reading orientation data
+        DataInStream(infname, c_inIO);                                      //thread to read in a PGM image
+        DataOutStream(outfname, c_outIO);                                   //thread to write out a PGM image
+        distributor(c_inIO, c_outIO, c_control, buttons, leds, reqTime);    //thread to coordinate work on image
         checkTime(reqTime, pauseTime);
     }
 

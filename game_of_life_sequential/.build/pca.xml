@@ -441,7 +441,7 @@
     </values>
   </arg>
 </fInfo>
-<fInfo name="distributor" global="true" specialize="false" noreturn="true" doNotSpecialize="false" numParams="5">
+<fInfo name="distributor" global="true" specialize="false" noreturn="true" doNotSpecialize="false" numParams="6">
   <arg num="0" specialize="false">
     <values>
       <value type="unknown"/>
@@ -463,6 +463,11 @@
     </values>
   </arg>
   <arg num="4" specialize="false">
+    <values>
+      <value type="unknown"/>
+    </values>
+  </arg>
+  <arg num="5" specialize="false">
     <values>
       <value type="unknown"/>
     </values>
@@ -681,7 +686,7 @@
   <arg num="0" specialize="false">
     <values>
       <value type="intval"><intval isSigned="true" val="8"/></value>
-      <value type="intval"><intval isSigned="true" val="16"/></value>
+      <value type="intval"><intval isSigned="true" val="64"/></value>
     </values>
   </arg>
   <arg num="1" specialize="false">
@@ -692,7 +697,7 @@
 </fInfo>
 <fInfo name="operation_complete" global="true" interface="i2c_master_async_if" specialize="false" noreturn="false" doNotSpecialize="false" numParams="0">
 </fInfo>
-<fInfo name="orientation" global="true" specialize="true" noreturn="true" doNotSpecialize="false" numParams="2">
+<fInfo name="orientation" global="true" specialize="true" noreturn="true" doNotSpecialize="false" numParams="3">
   <arg num="0" specialize="true">
     <values>
       <value type="interface"><interfaceInfo index="0" type="dist" func="_Si2c_master_0" global="true" impUnit="../src/main.xc" impId="0" param="0"/></value>
@@ -703,10 +708,16 @@
       <value type="unknown"/>
     </values>
   </arg>
+  <arg num="2" specialize="false">
+    <values>
+      <value type="unknown"/>
+    </values>
+  </arg>
  <specializations>
    <specialization id="0">
     <arg num="0"><values><value type="interface"><interfaceInfo index="0" type="dist" func="_Si2c_master_0" global="true" impUnit="../src/main.xc" impId="0" param="0"/></value></values></arg>
     <arg num="1"><values><value type="unknown"/></values></arg>
+    <arg num="2"><values><value type="unknown"/></values></arg>
    </specialization>
  </specializations>
 </fInfo>
@@ -1024,6 +1035,6 @@
 </fCall>
 <fCall name="i2c_master" global="true" callerUnit="../src/main.xc" numArgs="5" impId="0" specializationId="0">
 </fCall>
-<fCall name="orientation" global="true" callerUnit="../src/main.xc" numArgs="2" impId="1" specializationId="0">
+<fCall name="orientation" global="true" callerUnit="../src/main.xc" numArgs="3" impId="1" specializationId="0">
 </fCall>
 </preCompilationAnalysis>

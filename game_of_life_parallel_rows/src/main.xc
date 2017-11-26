@@ -380,7 +380,9 @@ void DataOutStream(char outfname[], chanend c_in)
 
          // unpack each bit and add to output line
          for ( int x = 0; x < 8; x++ ) {
-             line[p*8 + x] = unpack(x, packet);
+             int bit = unpack(x, packet);
+             if (bit) line[p*8 + x] = 0xFF;
+             else line[p*8 + x] = 0x00;
              //printf( "-%4.1d ", line[p*8 + x] ); //show image values
          }
     }

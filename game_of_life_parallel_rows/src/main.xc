@@ -9,8 +9,8 @@
 #include "i2c.h"
 #include <assert.h>
 
-#define  IMHT 64                  //image height
-#define  IMWD 64                  //image width
+#define  IMHT 1024                  //image height
+#define  IMWD 1024                  //image width
 #define  NWKS 8                   //number of workers
 #define  NPKT IMWD/8              //number of packets in a row
 
@@ -61,34 +61,70 @@ int unpack(int index, uchar byte) {             // unpack bit from index 'index'
     return (byte >> index) & 1;
 }
 
-void checkTime(chanend reqTime) {
-    //global timer variables
+// function that constantly tracks processing time and checks for clock overflow
+void checkTime(chanend req, chanend pause) {
+    // timer variables. timer ticks at 100MHz, 100000 ticks is 1ms.
     timer t;
-    uint32_t start = 0;
-    uint32_t prev = 0;
-    uint32_t curr = 0;
-    uint32_t timeTaken = 0;
+    uint32_t prev,
+             curr;
+    uint32_t timeTaken = 0;     // total time in milliseconds
 
-    int run = 0;
+    // variable for identifying whether game is paused
+    int paused = 0;
 
-    reqTime :> run;
-    t :> start;
+    // receive signal to start timing
+    req :> uchar x;
+    t :> prev;
+    //printf("Timer starting\n");
 
-    //if timer has maxed out then add a whole cycle (2^32 - 1 ticks)
-    while (1){
-        [[ordered]]
+    while (1) {
+        // Timer isn't paused so increment and wait for output request
+        while (!paused){
+
+            [[ordered]]
+            select {
+                case req :> uchar x:    // check to see if distributer wants the time
+                    if (x == 1) {
+                        req <: timeTaken;
+                        paused = 1;     // pause while distributer outputs
+                    }
+                    break;
+                case pause :> uchar x:  // check to see if board is tilted and timing should pause.
+                    if (x == 1) {
+                        paused = 1;
+                        req <: timeTaken;   // tell distributer to pause
+                        printf("Timer paused\n");
+                    }
+                    break;
+                default:
+                    t :> curr;
+
+                    // increment change in time
+                    timeTaken += curr / 100000;
+                    timeTaken -=  prev / 100000;
+                    // if overflow is hit, curr is 42950 too small. Compensate.
+                    if (prev > curr) timeTaken += 42950;
+                    prev = curr;
+                    break;
+            }
+        }
+
+        // Timer is paused, wait for permission to unpause
         select {
-            case reqTime :> int x:
-                t:> curr;
-                timeTaken += ((curr - start) / 100000);
-                reqTime <: timeTaken;
-                break;
-            default:
-                t :> curr;
-                if (prev > curr){
-                    timeTaken += 42950;
+            case pause :> uchar x:  // if board is untilted
+                if (x == 0) {
+                    paused = 0;
+                    t :> prev;
+                    req <: (uchar) 0;   // tell distributer to unpause
+                    printf("Timer unpaused by tilt\n");
                 }
-                prev = curr;
+                break;
+            case req :> uchar x:    // if distributer has finished outputting and wants to resume
+                if (x == 0) {
+                    paused = 0;
+                    t :> prev;
+                    printf("Timer unpaused by dist\n");
+                }
                 break;
         }
     }
@@ -142,7 +178,7 @@ void DataInStream(char infname[], chanend c_out)
 //             and sends new world to DataStreamOut
 //
 /////////////////////////////////////////////////////////////////////////////////////////
-void distributor(chanend c_in, chanend c_out, in port b, out port LEDs, chanend worker[NWKS], chanend reqTime)
+void distributor(chanend c_in, chanend c_out, chanend c_control, in port b, out port LEDs, chanend worker[NWKS], chanend reqTime)
 {
     tests();
 
@@ -155,8 +191,8 @@ void distributor(chanend c_in, chanend c_out, in port b, out port LEDs, chanend 
 
     // variables for output when paused
     uint32_t timeTaken;       // time taken to process image
-    int i = 0;                // iteration counter
-    int numAlive = 0;         // number of alive workers at current iteration
+    int numAlive = 0;         // number of alive cells at pause
+    int i = 0;                // current round at pause
 
     //Starting up and wait for tilting of the xCore-200 Explorer
     printf( "ProcessImage: Start, size = %dx%d\n", IMHT, IMWD );
@@ -178,7 +214,10 @@ void distributor(chanend c_in, chanend c_out, in port b, out port LEDs, chanend 
         }
     }
 
-    reqTime <: 1; //trigger timer funtion
+    // Inform orientation to start detecting tilts
+    c_control <: (uchar) 1;
+    // Start timing
+    reqTime <: (uchar) 0;
 
     // Divide work between workers
     for(int w = 0; w < NWKS; w++) {                         // for each of the workers
@@ -190,30 +229,92 @@ void distributor(chanend c_in, chanend c_out, in port b, out port LEDs, chanend 
         }
     }
 
-    // Receive processed cells from workers
-    for(int w = 0; w < NWKS; w++) {                   // for each of the workers
-        for(int y = 0; y < ((IMHT / NWKS)); y++ ) {   // for each row that will be used in new array (edge rows not returned)
-            for( int p = 0; p < NPKT; p++ ) {         // for every packet
-               // receive cell values from worker and place into new world array
-               worker[w] :> val[p][y + (w*(IMHT / NWKS))];
+    // game runs infinitely
+    while (1){
+        // loop whilst SW2 hasn't been pressed
+        while (button != 13){
+            select {
+                // if timer gives us the current time, pause
+                case reqTime :> timeTaken:
+                    // display red pause LED
+                    LEDs <: (uchar) 8;
+                    // send signal to worker for pausing
+                    for (int w = 0; w < NWKS; w++) worker[w] <: (uchar) 1;
+                    printf("Told workers to pause/n");
+                    // recieve number of alive cells from each worker
+                    for(int w = 0; w < NWKS; w++) {
+                        int x; // temporary storage of number of alive cells value from workers
+                        worker[w] :> x;
+                        numAlive += x;
+                    }
+
+                    // get round iteration from last worker in 'pipeline'
+                    worker[NWKS - 1] :> i;
+
+                    printf("Status Report:\n"
+                           " Number of rounds processed: %d\n"
+                           " Current number of live cells: %d\n"
+                           " Processing time elapsed: %d\n", i, numAlive, timeTaken);
+                    // wait until unpause
+                    reqTime :> uchar resume;
+                    numAlive = 0; // reset alive cell counter
+                    break;
+                default:
+                    // read button input, if any
+                    b :> button;
+                    // send signal to worker for processing
+                    for(int w = 0; w < NWKS; w++) worker[w] <: (uchar) 0;
+                    // flash processing LED via state change
+                    flashState ^= 1;
+                    LEDs <: flashState;
+                    break;
             }
         }
-    }
 
-    reqTime <: 0; // inform timer that it wants a return for time
-    reqTime :> timeTaken; // store returned time
-
-    printf("Processing: Complete in %dms\n", timeTaken);
-
-    // Send processed data to DataOutStream
-    for(int y = 0; y < IMHT; y++ ) {
-        for( int p = 0; p < NPKT; p++ ) { // for every packet
-            c_out <: val[p][y];           // send cell information to DataOutStream
+        // send signal to worker for outputting
+        // must be done before recieve values to prevent other workers
+        for(int w = 0; w < NWKS; w++) {
+            worker[w] <: (uchar) 2;
         }
+
+        // Receive processed cells from workers
+        for(int w = 0; w < NWKS; w++) {                   // for each of the workers
+            for(int y = 0; y < ((IMHT / NWKS)); y++ ) {   // for each row that will be used in new array (edge rows not returned)
+                for( int p = 0; p < NPKT; p++ ) {         // for every packet
+                   // receive cell values from worker and place into new world array
+                   worker[w] :> val[p][y + (w*(IMHT / NWKS))];
+                }
+            }
+        }
+
+        /* SW2 pressed, produce output */
+
+        reqTime <: (uchar) 1; // request timeTaken from timer, also pausing it
+        printf("SW2 pressed, asked timer for time and paused it\n");
+        reqTime :> timeTaken; // store returned time
+        printf("Got timeTaken\n");
+
+        printf("Processing: Outputting after %dms\n", timeTaken);
+
+        LEDs <: 2; // send blue LED to be lit
+
+        // tell DataOutStream to open an output file
+        //   this is necessary to prevent the previous file being corrupted
+        c_out <: (uchar) 1;
+
+        // Send processed data to DataOutStream
+        for(int y = 0; y < IMHT; y++ ) {
+            for( int p = 0; p < NPKT; p++ ) { // for every packet
+                c_out <: val[p][y];           // send cell information to DataOutStream
+            }
+        }
+        LEDs <: 0; // turn off blue LED
+
+        printf("Outputted\n");
+
+        reqTime <: (uchar) 0; // unpause the timer after output
+        b :> button;          // get new button status
     }
-
-
-    //printf( "\nOne processing round completed...\n" );
 }
 
 int getNeighbours(int x, int y, uchar rowVal[NPKT][IMHT / NWKS + 2]) {
@@ -251,7 +352,7 @@ int getNeighbours(int x, int y, uchar rowVal[NPKT][IMHT / NWKS + 2]) {
 
 /////////////////////////////////////////////////////////////////////////////////////////
 //
-// Initialise workers to work on a row of cells
+// Initialise workers to process given rows of cells
 //
 /////////////////////////////////////////////////////////////////////////////////////////
 void worker(int id, chanend fromFarmer, chanend wLeft, chanend wRight)
@@ -262,8 +363,10 @@ void worker(int id, chanend fromFarmer, chanend wLeft, chanend wRight)
     uchar rowVal[NPKT][(IMHT / NWKS) + 2];
     // array for output rows
     uchar newVal[NPKT][(IMHT / NWKS)];
-    // iteration counter
-    int i = 0;
+
+    int i = 0;                // iteration counter
+    int numAlive = 0;         // number of alive workers at current iteration
+    uchar loop = 1;           // whether or not worker should loop or output to dist
 
     // contruct array to work on
     for( int y = 0; y < (load + 2); y++ ) {     // for every row to be input
@@ -273,83 +376,110 @@ void worker(int id, chanend fromFarmer, chanend wLeft, chanend wRight)
         }
     }
 
-    while (i < 1) {
-        // Look at neighbouring cells and work out the next state of each cell
-        for( int y = 1; y < load + 1; y++ ) {              // for every row excluding edge rows
-            for( int p = 0; p < NPKT; p++ ) {             // for every packet in the row
-                // packet for new cell values, start with all alive
-                uchar newP = 0xFF;
-                for ( int x = 0; x < 8; x++) {             // for every bit in the packet
+    uchar s;
+    // game runs infinitely
+    while (loop) {
+        fromFarmer :> s; //receive signal from dist
+        // default case: run iteration
+        if (s == 0){
 
-                    // get number of alive neighbours
-                    int alive = getNeighbours(x + p*8, y, rowVal);
+            numAlive = 0; //reset number of alive cells counter
+            // Look at neighbouring cells and work out the next state of each cell
+            for( int y = 1; y < load + 1; y++ ) {              // for every row excluding edge rows
+                for( int p = 0; p < NPKT; p++ ) {             // for every packet in the row
+                    // packet for new cell values, start with all alive
+                    uchar newP = 0xFF;
+                    numAlive += 8;
+                    for ( int x = 0; x < 8; x++) {             // for every bit in the packet
 
-                    // If currently alive
-                    if (unpack(x, rowVal[p][y]) == 1) {
-                        // If number of alive neighbours isn't two or three, die. Else stay alive by default
-                        if (alive != 2 && alive != 3)
+                        // get number of alive neighbours
+                        int alive = getNeighbours(x + p*8, y, rowVal);
+
+                        // If currently alive
+                        if (unpack(x, rowVal[p][y]) == 1) {
+                            // If number of alive neighbours isn't two or three, die. Else stay alive by default
+                            if (alive != 2 && alive != 3){
+                                newP = pack(x, newP, 0x0);
+                                numAlive--;
+                            }
+                        }
+                        // Else cell is currently dead: if not exactly three alive neighbours stay dead
+                        else if (alive != 3){
                             newP = pack(x, newP, 0x0);
+                            numAlive--;
+                        }
                     }
-                    // Else cell is currently dead: if not exactly three alive neighbours stay dead
-                    else if (alive != 3)
-                        newP = pack(x, newP, 0x0);
+                    newVal[p][y - 1] = newP;
                 }
-                newVal[p][y - 1] = newP;
             }
-        }
 
-        // Update processed rows for use in next iteration
-        for( int y = 0; y < load; y++ ) {                  // for every row excluding edge rows
-            for( int p = 0; p < NPKT; p++ ) {            // for each packet
-                rowVal[p][y + 1] = newVal[p][y];           // update non-overlapping rows
+            // Update processed rows for use in next iteration
+            for( int y = 0; y < load; y++ ) {                  // for every row excluding edge rows
+                for( int p = 0; p < NPKT; p++ ) {            // for each packet
+                    rowVal[p][y + 1] = newVal[p][y];           // update non-overlapping rows
+                }
             }
+
+           /*
+            Update ghost row states for next iteration by communicating with other workers
+            as well as send ghost row states for other workers to use
+            e.g: four workers:
+               w0 <--- w1      w2 <--- w3
+               w0      w1 ---> w2      w3 --->
+               w0 ---> w1      w2 ---> w3
+               w0      w1 <--- w2      w3 <---
+           */
+
+           if (id % 2 == 1) { // odd numbered workers
+               // 1. send to left
+               for ( int p = 0; p < NPKT; p++ )
+                   wLeft <: newVal[p][0];
+
+               // 2. send to right
+               for ( int p = 0; p < NPKT; p++ )
+                   wRight <: newVal[p][load - 1];
+               // 3. receive from left
+               for ( int p = 0; p < NPKT; p++ )
+                   wLeft :> rowVal[p][0];
+               // 4. receive from right
+               for ( int p = 0; p < NPKT; p++ )
+                   wRight :> rowVal[p][load + 1];
+           }
+           else {             // even numbered workers
+               // 1. receive from right
+               for ( int p = 0; p < NPKT; p++ )
+                   wRight :> rowVal[p][load + 1];
+               // 2. receive from left
+               for ( int p = 0; p < NPKT; p++ )
+                   wLeft :> rowVal[p][0];
+               // 3. send to right
+               for ( int p = 0; p < NPKT; p++ )
+                   wRight <: newVal[p][load - 1];
+               // 4. send to left
+               for ( int p = 0; p < NPKT; p++ )
+                   wLeft <: newVal[p][0];
+           }
+
+           //increment iteration counter
+           i++;
         }
-
-       /*
-        Update ghost row states for next iteration by communicating with other workers
-        as well as send ghost row states for other workers to use
-        e.g: four workers:
-           w0 <--- w1      w2 <--- w3
-           w0      w1 ---> w2      w3 --->
-           w0 ---> w1      w2 ---> w3
-           w0      w1 <--- w2      w3 <---
-       */
-
-       if (id % 2 == 1) { // odd numbered workers
-           // 1. send to left
-           for ( int p = 0; p < NPKT; p++ )
-               wLeft <: newVal[p][0];
-           // 2. send to right
-           for ( int p = 0; p < NPKT; p++ )
-               wRight <: newVal[p][load - 1];
-           // 3. receive from left
-           for ( int p = 0; p < NPKT; p++ )
-               wLeft :> rowVal[p][0];
-           // 4. receive from right
-           for ( int p = 0; p < NPKT; p++ )
-               wRight :> rowVal[p][load + 1];
-       }
-       else {             // even numbered workers
-           // 1. receive from right
-           for ( int p = 0; p < NPKT; p++ )
-               wRight :> rowVal[p][load + 1];
-           // 2. receive from left
-           for ( int p = 0; p < NPKT; p++ )
-               wLeft :> rowVal[p][0];
-           // 3. send to right
-           for ( int p = 0; p < NPKT; p++ )
-               wRight <: newVal[p][load - 1];
-           // 4. send to left
-           for ( int p = 0; p < NPKT; p++ )
-               wLeft <: newVal[p][0];
-       }
-       i++;
-    }
-
-    // Send new cell states to farmer for combining
-    for( int y = 0; y < load; y++ ) {             // for every row excluding edge rows
-        for( int p = 0; p < NPKT; p++ ) {       // for each packet
-            fromFarmer <: newVal[p][y];           // send to farmer (distributer)
+        // case where board is tilted and status print is required
+        else if (s == 1){
+            // send number of currently alive cells
+            fromFarmer <: numAlive;
+            // if you're the last worker, send the loop iteration
+            if (id == (NWKS - 1)) fromFarmer <: i;
+            // wait for unpause signal to proceed
+            fromFarmer :> uchar unpause;
+        }
+        // case where SW2 is pressed and game needs to be output
+        else if (s == 2){
+            // Send new cell states to farmer for combining
+            for( int y = 0; y < load; y++ ) {             // for every row excluding edge rows
+                for( int p = 0; p < NPKT; p++ ) {       // for each packet
+                    fromFarmer <: newVal[p][y];           // send to farmer (distributer)
+                }
+            }
         }
     }
 }
@@ -366,35 +496,40 @@ void DataOutStream(char outfname[], chanend c_in)
 
     //Open PGM file
     printf( "DataOutStream: Start...\n" );
-    res = _openoutpgm( outfname, IMWD, IMHT );
-    if( res ) {
-        printf( "DataOutStream: Error opening %s\n.", outfname );
-        return;
+
+    while(1) {
+        c_in :> uchar x; // if distributer has a game state for outputting
+
+        res = _openoutpgm( outfname, IMWD, IMHT );
+        if( res ) {
+            printf( "DataOutStream: Error opening %s\n.", outfname );
+            return;
+        }
+        //Compile each line of the image and write the image line-by-line
+        for( int y = 0; y < IMHT; y++ ) {
+            for( int p = 0; p < NPKT; p++ ) {
+                uchar packet;
+                c_in :> packet;
+
+                // unpack each bit and add to output line
+                for ( int x = 0; x < 8; x++ ) {
+                    int bit = unpack(x, packet);
+                    if (bit) line[p*8 + x] = 0xFF;
+                    else line[p*8 + x] = 0x00;
+                    //printf( "-%4.1d", line[p*8 + x]); //show image values
+              }
+        }
+        //printf( "\n" );
+        _writeoutline( line, IMWD );
+        //printf( "DataOutStream: Line written...\n" );
+        }
+
+        //Close the PGM image
+        _closeoutpgm();
+
+        printf( "DataOutStream: Complete\n");
     }
 
-    //Compile each line of the image and write the image line-by-line
-    for( int y = 0; y < IMHT; y++ ) {
-        for( int p = 0; p < NPKT; p++ ) {
-         uchar packet;
-         c_in :> packet;
-
-         // unpack each bit and add to output line
-         for ( int x = 0; x < 8; x++ ) {
-             int bit = unpack(x, packet);
-             if (bit) line[p*8 + x] = 0xFF;
-             else line[p*8 + x] = 0x00;
-             //printf( "-%4.1d ", line[p*8 + x] ); //show image values
-         }
-    }
-    //printf( "\n" );
-
-    _writeoutline( line, IMWD );
-    //printf( "DataOutStream: Line written...\n" );
-    }
-
-    //Close the PGM image
-    _closeoutpgm();
-    printf( "DataOutStream: Done...\n" );
     return;
 }
 
@@ -403,7 +538,7 @@ void DataOutStream(char outfname[], chanend c_in)
 // Initialise and  read orientation, send first tilt event to channel
 //
 /////////////////////////////////////////////////////////////////////////////////////////
-void orientation( client interface i2c_master_if i2c) {
+void orientation( client interface i2c_master_if i2c, chanend dist, chanend toTimer) {
     i2c_regop_res_t result;
     char status_data = 0;
     int tilted = 0;
@@ -420,6 +555,9 @@ void orientation( client interface i2c_master_if i2c) {
         printf("I2C write reg failed\n");
     }
 
+    // wait for start signal from distributor
+    dist :> uchar x;
+
     //Probe the orientation x-axis forever
     while (1) {
 
@@ -434,12 +572,12 @@ void orientation( client interface i2c_master_if i2c) {
       if (!tilted) {
           if (x>30) {
               tilted = 1;
-              //toTimer <: (uchar) 1;
+              toTimer <: (uchar) 1;
           }
       }
       else if (x<10) {
           tilted = 0;
-          //toTimer <: (uchar) 0;
+          toTimer <: (uchar) 0;
       }
     }
 }
@@ -474,17 +612,19 @@ int main(void) {
     // Channel definitions
     chan c_inIO,     // DataStreamIn
          c_outIO,    // DataStreamOut
+         c_control,  // communication between orientation and distributor
          WtoD[NWKS], // Workers to Distributer
          WtoW[NWKS], // Workers to Workers
-         reqTime;    // request time
+         reqTime,    // request time
+         pauseTime;  // pause time
 
     par {
         on tile[0] : i2c_master(i2c, 1, p_scl, p_sda, 10);                      //server thread providing orientation data
-        on tile[0] : orientation(i2c[0]);                             //client thread reading orientation data
-        on tile[0] : DataInStream("64x64.pgm", c_inIO);                       //thread to read in a PGM image
-        on tile[0] : DataOutStream("64x64out.pgm", c_outIO);                  //thread to write out a PGM image
-        on tile[0] : distributor(c_inIO, c_outIO, buttons, leds, WtoD, reqTime);    //thread to coordinate work on image
-        on tile[0] : checkTime(reqTime);
+        on tile[0] : orientation(i2c[0], c_control, pauseTime);                 //client thread reading orientation data
+        on tile[0] : DataInStream("1024x1024.pgm", c_inIO);                       //thread to read in a PGM image
+        on tile[0] : DataOutStream("1024x1024out.pgm", c_outIO);                  //thread to write out a PGM image
+        on tile[0] : distributor(c_inIO, c_outIO, c_control, buttons, leds, WtoD, reqTime);    //thread to coordinate work on image
+        on tile[0] : checkTime(reqTime, pauseTime);
         //initialise workers
         par (int i = 0; i < NWKS ; i++){
             on tile[1] : worker((i+1) % NWKS, WtoD[(i+1) % NWKS], WtoW[i], WtoW[(i+1) % NWKS]);

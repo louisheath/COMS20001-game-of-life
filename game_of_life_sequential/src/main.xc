@@ -1,4 +1,4 @@
-// COMS20001 - Cellular Automaton Farm - Initial Code Skeleton
+ // COMS20001 - Cellular Automaton Farm - Initial Code Skeleton
 // (using the XMOS i2c accelerometer demo code)
 
 #include <platform.h>
@@ -7,8 +7,8 @@
 #include "pgmIO.h"
 #include "i2c.h"
 
-#define  IMHT 64                  //image height
-#define  IMWD 64                  //image width
+#define  IMHT 512                  //image height
+#define  IMWD 512                  //image width
 #define  NPKT IMWD/8              //number of packets in a row
 
 typedef unsigned char uchar;      //using uchar as shorthand
@@ -461,11 +461,11 @@ int main(void) {
 
     i2c_master_if i2c[1];              //interface to orientation
 
-    char infname[] = "64x64.pgm";     //put your input image path here
-    char outfname[] = "64x64out.pgm"; //put your output image path here
+    char infname[] = "512x512.pgm";     //put your input image path here
+    char outfname[] = "512x512out.pgm"; //put your output image path here
     chan c_inIO,        // DataStreamIn
          c_outIO,       // DataStreamOut
-         c_control,
+         c_control,     // communication between orientation and distributor
          reqTime,       // Request time
          pauseTime;     // Orientation to Timer pause signal
 

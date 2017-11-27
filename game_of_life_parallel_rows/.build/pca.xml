@@ -515,7 +515,7 @@
   <arg num="0" specialize="false">
     <values>
       <value type="interface"><interfaceInfo index="0" type="dist" func="i2c_master" global="true" impUnit="C:/Users/jackj/Documents/GitHub/COMS20001-game-of-life/lib_i2c/src/i2c_master_async.xc" impId="0" param="0"/></value>
-      <value type="interface"><interfaceInfo index="0" type="dist" func="_Si2c_master_0" global="true" impUnit="../src/main.xc" impId="2" param="0"/></value>
+      <value type="interface"><interfaceInfo index="0" type="dist" func="_Si2c_master_0" global="true" impUnit="../src/main.xc" impId="1" param="0"/></value>
     </values>
   </arg>
   <arg num="1" specialize="true">
@@ -708,7 +708,7 @@
 <fInfo name="orientation" global="true" specialize="true" noreturn="true" doNotSpecialize="false" numParams="3">
   <arg num="0" specialize="true">
     <values>
-      <value type="interface"><interfaceInfo index="0" type="dist" func="_Si2c_master_0" global="true" impUnit="../src/main.xc" impId="2" param="0"/></value>
+      <value type="interface"><interfaceInfo index="0" type="dist" func="_Si2c_master_0" global="true" impUnit="../src/main.xc" impId="1" param="0"/></value>
     </values>
   </arg>
   <arg num="1" specialize="false">
@@ -723,7 +723,7 @@
   </arg>
  <specializations>
    <specialization id="0">
-    <arg num="0"><values><value type="interface"><interfaceInfo index="0" type="dist" func="_Si2c_master_0" global="true" impUnit="../src/main.xc" impId="2" param="0"/></value></values></arg>
+    <arg num="0"><values><value type="interface"><interfaceInfo index="0" type="dist" func="_Si2c_master_0" global="true" impUnit="../src/main.xc" impId="1" param="0"/></value></values></arg>
     <arg num="1"><values><value type="unknown"/></values></arg>
     <arg num="2"><values><value type="unknown"/></values></arg>
    </specialization>
@@ -792,7 +792,7 @@
 <fInfo name="read_acceleration" global="true" specialize="true" noreturn="false" doNotSpecialize="false" numParams="2">
   <arg num="0" specialize="true">
     <values>
-      <value type="interface"><interfaceInfo index="0" type="dist" func="_Si2c_master_0" global="true" impUnit="../src/main.xc" impId="2" param="0"/></value>
+      <value type="interface"><interfaceInfo index="0" type="dist" func="_Si2c_master_0" global="true" impUnit="../src/main.xc" impId="1" param="0"/></value>
     </values>
   </arg>
   <arg num="1" specialize="true">
@@ -802,7 +802,7 @@
   </arg>
  <specializations>
    <specialization id="0">
-    <arg num="0"><values><value type="interface"><interfaceInfo index="0" type="dist" func="_Si2c_master_0" global="true" impUnit="../src/main.xc" impId="2" param="0"/></value></values></arg>
+    <arg num="0"><values><value type="interface"><interfaceInfo index="0" type="dist" func="_Si2c_master_0" global="true" impUnit="../src/main.xc" impId="1" param="0"/></value></values></arg>
     <arg num="1"><values><value type="intval"><intval isSigned="true" val="1"/></value></values></arg>
    </specialization>
  </specializations>
@@ -928,10 +928,6 @@
       <value type="intval"><intval isSigned="true" val="1"/></value>
       <value type="intval"><intval isSigned="true" val="2"/></value>
       <value type="intval"><intval isSigned="true" val="3"/></value>
-      <value type="intval"><intval isSigned="true" val="4"/></value>
-      <value type="intval"><intval isSigned="true" val="5"/></value>
-      <value type="intval"><intval isSigned="true" val="6"/></value>
-      <value type="intval"><intval isSigned="true" val="7"/></value>
     </values>
   </arg>
   <arg num="1" specialize="false">
@@ -1083,8 +1079,8 @@
 </fCall>
 <fCall name="i2c_master_async_aux" global="true" callerUnit="C:/Users/jackj/Documents/GitHub/COMS20001-game-of-life/lib_i2c/src/i2c_master_async.xc" numArgs="4" impId="1" specializationId="0">
 </fCall>
-<fCall name="i2c_master" global="true" callerUnit="../src/main.xc" numArgs="5" impId="2" specializationId="0">
+<fCall name="i2c_master" global="true" callerUnit="../src/main.xc" numArgs="5" impId="1" specializationId="0">
 </fCall>
-<fCall name="orientation" global="true" callerUnit="../src/main.xc" numArgs="3" impId="3" specializationId="0">
+<fCall name="orientation" global="true" callerUnit="../src/main.xc" numArgs="3" impId="2" specializationId="0">
 </fCall>
 </preCompilationAnalysis>

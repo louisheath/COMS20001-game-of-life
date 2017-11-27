@@ -11,7 +11,7 @@
 
 #define  IMHT 1024                  //image height
 #define  IMWD 1024                  //image width
-#define  NWKS 8                   //number of workers
+#define  NWKS 4                   //number of workers
 #define  NPKT IMWD/8              //number of packets in a row
 
 typedef unsigned char uchar;      //using uchar as shorthand
@@ -254,7 +254,7 @@ void distributor(chanend c_in, chanend c_out, chanend c_control, in port b, out 
                     printf("Status Report:\n"
                            " Number of rounds processed: %d\n"
                            " Current number of live cells: %d\n"
-                           " Processing time elapsed: %d\n", i, numAlive, timeTaken);
+                           " Processing time elapsed: %dms\n", i, numAlive, timeTaken);
                     // wait until unpause
                     reqTime :> uchar resume;
                     numAlive = 0; // reset alive cell counter
@@ -361,8 +361,9 @@ void worker(int id, chanend fromFarmer, chanend wLeft, chanend wRight)
     int load = IMHT / NWKS;
     // array of rows worker will work on
     uchar rowVal[NPKT][(IMHT / NWKS) + 2];
-    // array for output rows
-    uchar newVal[NPKT][(IMHT / NWKS)];
+    // arrays for storing processed rows
+    uchar prevRow[NPKT];
+    uchar currRow[NPKT];
 
     int i = 0;                // iteration counter
     int numAlive = 0;         // number of alive workers at current iteration
@@ -409,14 +410,15 @@ void worker(int id, chanend fromFarmer, chanend wLeft, chanend wRight)
                             numAlive--;
                         }
                     }
-                    newVal[p][y - 1] = newP;
+                    currRow[p] = newP;
                 }
-            }
 
-            // Update processed rows for use in next iteration
-            for( int y = 0; y < load; y++ ) {                  // for every row excluding edge rows
-                for( int p = 0; p < NPKT; p++ ) {            // for each packet
-                    rowVal[p][y + 1] = newVal[p][y];           // update non-overlapping rows
+                for( int p = 0; p < NPKT; p++ ) {                           // for each packet
+                    if (y > 1){ // if newVal is full
+                        rowVal[p][y - 1] = prevRow[p];                      // update non-overlapping rows
+                        if (y == load + 1) rowVal[p][y - 1] = currRow[p];   // update both rows if on last iteration of rows
+                    }
+                    prevRow[p] = currRow[p];                                // move current processed row to previous row storage for writing next iteration
                 }
             }
 
@@ -433,11 +435,11 @@ void worker(int id, chanend fromFarmer, chanend wLeft, chanend wRight)
            if (id % 2 == 1) { // odd numbered workers
                // 1. send to left
                for ( int p = 0; p < NPKT; p++ )
-                   wLeft <: newVal[p][0];
+                   wLeft <: rowVal[p][0];
 
                // 2. send to right
                for ( int p = 0; p < NPKT; p++ )
-                   wRight <: newVal[p][load - 1];
+                   wRight <: rowVal[p][load - 1];
                // 3. receive from left
                for ( int p = 0; p < NPKT; p++ )
                    wLeft :> rowVal[p][0];
@@ -454,10 +456,10 @@ void worker(int id, chanend fromFarmer, chanend wLeft, chanend wRight)
                    wLeft :> rowVal[p][0];
                // 3. send to right
                for ( int p = 0; p < NPKT; p++ )
-                   wRight <: newVal[p][load - 1];
+                   wRight <: rowVal[p][load - 1];
                // 4. send to left
                for ( int p = 0; p < NPKT; p++ )
-                   wLeft <: newVal[p][0];
+                   wLeft <: rowVal[p][0];
            }
 
            //increment iteration counter
@@ -475,9 +477,9 @@ void worker(int id, chanend fromFarmer, chanend wLeft, chanend wRight)
         // case where SW2 is pressed and game needs to be output
         else if (s == 2){
             // Send new cell states to farmer for combining
-            for( int y = 0; y < load; y++ ) {             // for every row excluding edge rows
-                for( int p = 0; p < NPKT; p++ ) {       // for each packet
-                    fromFarmer <: newVal[p][y];           // send to farmer (distributer)
+            for( int y = 0; y < load; y++ ) {               // for every row excluding edge rows
+                for( int p = 0; p < NPKT; p++ ) {           // for each packet
+                    fromFarmer <: rowVal[p][y];             // send to farmer (distributer)
                 }
             }
         }
@@ -621,14 +623,17 @@ int main(void) {
     par {
         on tile[0] : i2c_master(i2c, 1, p_scl, p_sda, 10);                      //server thread providing orientation data
         on tile[0] : orientation(i2c[0], c_control, pauseTime);                 //client thread reading orientation data
-        on tile[0] : DataInStream("512x512.pgm", c_inIO);                       //thread to read in a PGM image
-        on tile[0] : DataOutStream("512x512out.pgm", c_outIO);                  //thread to write out a PGM image
+        on tile[0] : DataInStream("1024x1024.pgm", c_inIO);                       //thread to read in a PGM image
+        on tile[0] : DataOutStream("1024x1024out.pgm", c_outIO);                  //thread to write out a PGM image
         on tile[0] : distributor(c_inIO, c_outIO, c_control, buttons, leds, WtoD, reqTime);    //thread to coordinate work on image
         on tile[0] : checkTime(reqTime, pauseTime);
         //initialise workers
-        par (int i = 0; i < NWKS ; i++){
+        par (int i = 0; i < (NWKS) ; i++){
             on tile[1] : worker((i+1) % NWKS, WtoD[(i+1) % NWKS], WtoW[i], WtoW[(i+1) % NWKS]);
         }
+//        par (int i = (NWKS - 1); i < NWKS ; i++){
+//            on tile[0] : worker((i+1) % NWKS, WtoD[(i+1) % NWKS], WtoW[i], WtoW[(i+1) % NWKS]);
+//        }
         // channels between workers: e.g. 4 workers
         //
         //    <--- w0 <-----> w1 <-----> w2 <-----> w3 --->

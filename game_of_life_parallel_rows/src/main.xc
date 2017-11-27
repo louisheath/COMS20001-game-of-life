@@ -9,9 +9,9 @@
 #include "i2c.h"
 #include <assert.h>
 
-#define  IMHT 1024                  //image height
-#define  IMWD 1024                  //image width
-#define  NWKS 4                   //number of workers
+#define  IMHT 16                  //image height
+#define  IMWD 16                  //image width
+#define  NWKS 8                   //number of workers
 #define  NPKT IMWD/8              //number of packets in a row
 
 typedef unsigned char uchar;      //using uchar as shorthand
@@ -47,12 +47,10 @@ int mod(int n,int x) {
 
 uchar pack(int index, uchar byte, uchar c) {    // pack c into packet 'byte' at index 'index'
     if (c == 0x0) {
-        byte = byte & ~(1 << index);
-        index++;
+        byte &= ~(1 << index);
     }
     else if (c == 0xFF) {
-        byte = byte | (1 << index);
-        index++;
+        byte |= (1 << index);
     }
     return byte;
 }
@@ -321,6 +319,7 @@ int getNeighbours(int x, int y, uchar rowVal[NPKT][IMHT / NWKS + 2]) {
     // variables used in finding neighbours
     int xRight = mod(IMWD, x+1);
     int xLeft = mod(IMWD, x-1);
+        // we don't mod the y, because we never call edge cases in worker
 
     // coordinates for neighbours
     int nCoords[8][2] = {
@@ -367,7 +366,6 @@ void worker(int id, chanend fromFarmer, chanend wLeft, chanend wRight)
 
     int i = 0;                // iteration counter
     int numAlive = 0;         // number of alive workers at current iteration
-    uchar loop = 1;           // whether or not worker should loop or output to dist
 
     // contruct array to work on
     for( int y = 0; y < (load + 2); y++ ) {     // for every row to be input
@@ -379,20 +377,20 @@ void worker(int id, chanend fromFarmer, chanend wLeft, chanend wRight)
 
     uchar s;
     // game runs infinitely
-    while (loop) {
+    while (1) {
         fromFarmer :> s; //receive signal from dist
         // default case: run iteration
-        if (s == 0){
-
+        if (s == 0) {
             numAlive = 0; //reset number of alive cells counter
+
             // Look at neighbouring cells and work out the next state of each cell
             for( int y = 1; y < load + 1; y++ ) {              // for every row excluding edge rows
-                for( int p = 0; p < NPKT; p++ ) {             // for every packet in the row
+                for( int p = 0; p < NPKT; p++ ) {              // for every packet in the row
                     // packet for new cell values, start with all alive
                     uchar newP = 0xFF;
                     numAlive += 8;
-                    for ( int x = 0; x < 8; x++) {             // for every bit in the packet
 
+                    for ( int x = 0; x < 8; x++) {             // for every bit in the current packet
                         // get number of alive neighbours
                         int alive = getNeighbours(x + p*8, y, rowVal);
 
@@ -413,10 +411,12 @@ void worker(int id, chanend fromFarmer, chanend wLeft, chanend wRight)
                     currRow[p] = newP;
                 }
 
-                for( int p = 0; p < NPKT; p++ ) {                           // for each packet
-                    if (y > 1){ // if newVal is full
+                for( int p = 0; p < NPKT; p++ ) {
+                    // if we're at the last row, update it as the y loop is going to stop
+                    if (y == load + 1) rowVal[p][y - 1] = currRow[p];
+                    // if we're on at least the second row we no longer depend on prevRow and can output
+                    else if (y > 1) {
                         rowVal[p][y - 1] = prevRow[p];                      // update non-overlapping rows
-                        if (y == load + 1) rowVal[p][y - 1] = currRow[p];   // update both rows if on last iteration of rows
                     }
                     prevRow[p] = currRow[p];                                // move current processed row to previous row storage for writing next iteration
                 }
@@ -589,9 +589,18 @@ void tests() {
     assert(NPKT == IMWD/8);
     assert(mod(2,5) == 1);
     assert(mod(8, 17) == 1);
-    assert(5 / 2 == 2);
+    assert(5 / 2 == 2);                 // checking that division rounds down
+    //
+    // Testing packing
+    //
     assert(pack(3, 0x00, 0xFF) == 0x08);
-    uchar testVal = 0xE6; // 11100110
+    assert(pack(7, 0x00, 0xFF) == 0x80);
+    assert(pack(0, 0x00, 0xFF) == 0x01);
+    assert(pack(0, 0xFF, 0x00) == 0xFE);
+    //
+    // Testing unpacking with 11100110
+    //
+    uchar testVal = 0xE6;
     assert(unpack(0, testVal) == 0);
     assert(unpack(1, testVal) == 1);
     assert(unpack(2, testVal) == 1);
@@ -600,6 +609,18 @@ void tests() {
     assert(unpack(5, testVal) == 1);
     assert(unpack(6, testVal) == 1);
     assert(unpack(7, testVal) == 1);
+    //
+    // Testing getNeighbours with every packet containing 11100110
+    //   note: getNeighbours is designed not to take edge rows
+    uchar testState[NPKT][IMHT / NWKS + 2];
+    for (int y = 0; y < IMHT / NWKS + 2; y++) {
+        for (int p = 0; p < NPKT; p++) {
+            testState[p][y] = testVal;
+        }
+    }
+    assert(getNeighbours(3, 1, testState) == 3);
+    assert(getNeighbours(11, 1, testState) == 3);
+
     printf("Tests successful\n");
 }
 
@@ -623,8 +644,8 @@ int main(void) {
     par {
         on tile[0] : i2c_master(i2c, 1, p_scl, p_sda, 10);                      //server thread providing orientation data
         on tile[0] : orientation(i2c[0], c_control, pauseTime);                 //client thread reading orientation data
-        on tile[0] : DataInStream("1024x1024.pgm", c_inIO);                       //thread to read in a PGM image
-        on tile[0] : DataOutStream("1024x1024out.pgm", c_outIO);                  //thread to write out a PGM image
+        on tile[0] : DataInStream("16x16.pgm", c_inIO);                       //thread to read in a PGM image
+        on tile[0] : DataOutStream("16x16out.pgm", c_outIO);                  //thread to write out a PGM image
         on tile[0] : distributor(c_inIO, c_outIO, c_control, buttons, leds, WtoD, reqTime);    //thread to coordinate work on image
         on tile[0] : checkTime(reqTime, pauseTime);
         //initialise workers

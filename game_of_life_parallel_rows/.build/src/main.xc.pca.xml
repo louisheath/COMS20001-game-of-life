@@ -1287,10 +1287,10 @@
     </values>
   </arg>
 </fCall>
-<fCall name="i2c_master" global="true" numArgs="5" impId="1">
+<fCall name="i2c_master" global="true" numArgs="5" impId="2">
   <arg num="0">
     <values>
-      <value type="interface"><interfaceInfo index="0" type="dist" func="i2c_master" global="true" impUnit="../src/main.xc" impId="1" param="0"/></value>
+      <value type="interface"><interfaceInfo index="0" type="dist" func="i2c_master" global="true" impUnit="../src/main.xc" impId="2" param="0"/></value>
     </values>
   </arg>
   <arg num="1">
@@ -1314,10 +1314,10 @@
     </values>
   </arg>
 </fCall>
-<fCall name="orientation" global="true" numArgs="3" impId="2">
+<fCall name="orientation" global="true" numArgs="3" impId="3">
   <arg num="0">
     <values>
-      <value type="interface"><interfaceInfo index="0" type="dist" func="i2c_master" global="true" impUnit="../src/main.xc" impId="1" param="0"/></value>
+      <value type="interface"><interfaceInfo index="0" type="dist" func="i2c_master" global="true" impUnit="../src/main.xc" impId="2" param="0"/></value>
     </values>
   </arg>
   <arg num="1">
@@ -1331,7 +1331,7 @@
     </values>
   </arg>
 </fCall>
-<fCall name="DataInStream" global="true" numArgs="2" impId="3">
+<fCall name="DataInStream" global="true" numArgs="2" impId="4">
   <arg num="0">
     <values>
       <value type="unknown"/>
@@ -1343,7 +1343,7 @@
     </values>
   </arg>
 </fCall>
-<fCall name="DataOutStream" global="true" numArgs="2" impId="4">
+<fCall name="DataOutStream" global="true" numArgs="2" impId="5">
   <arg num="0">
     <values>
       <value type="unknown"/>
@@ -1355,7 +1355,7 @@
     </values>
   </arg>
 </fCall>
-<fCall name="distributor" global="true" numArgs="7" impId="5">
+<fCall name="distributor" global="true" numArgs="7" impId="6">
   <arg num="0">
     <values>
       <value type="unknown"/>
@@ -1392,7 +1392,7 @@
     </values>
   </arg>
 </fCall>
-<fCall name="checkTime" global="true" numArgs="2" impId="6">
+<fCall name="checkTime" global="true" numArgs="2" impId="7">
   <arg num="0">
     <values>
       <value type="unknown"/>
@@ -1536,7 +1536,7 @@
     </values>
   </arg>
 </fCall>
-<fCall name="worker" global="true" numArgs="4" impId="0">
+<fCall name="worker" global="true" numArgs="4" impId="1">
   <arg num="0">
     <values>
       <value type="intval"><intval isSigned="true" val="7"/></value>
@@ -1558,7 +1558,7 @@
     </values>
   </arg>
 </fCall>
-<fCall name="worker" global="true" numArgs="4" impId="0">
+<fCall name="worker" global="true" numArgs="4" impId="1">
   <arg num="0">
     <values>
       <value type="intval"><intval isSigned="true" val="0"/></value>

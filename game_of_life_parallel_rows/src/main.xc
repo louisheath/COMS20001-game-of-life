@@ -621,8 +621,8 @@ int main(void) {
     par {
         on tile[0] : i2c_master(i2c, 1, p_scl, p_sda, 10);                      //server thread providing orientation data
         on tile[0] : orientation(i2c[0], c_control, pauseTime);                 //client thread reading orientation data
-        on tile[0] : DataInStream("1024x1024.pgm", c_inIO);                       //thread to read in a PGM image
-        on tile[0] : DataOutStream("1024x1024out.pgm", c_outIO);                  //thread to write out a PGM image
+        on tile[0] : DataInStream("512x512.pgm", c_inIO);                       //thread to read in a PGM image
+        on tile[0] : DataOutStream("512x512out.pgm", c_outIO);                  //thread to write out a PGM image
         on tile[0] : distributor(c_inIO, c_outIO, c_control, buttons, leds, WtoD, reqTime);    //thread to coordinate work on image
         on tile[0] : checkTime(reqTime, pauseTime);
         //initialise workers

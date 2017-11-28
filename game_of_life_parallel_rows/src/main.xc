@@ -388,8 +388,8 @@ void worker(int id, chanend fromFarmer, chanend wLeft, chanend wRight)
             if (i == 99) {
                 // tell distributor ready to output
                 if (id == 0) fromFarmer <: (uchar) 1;
-                // send output
-                fromFarmer <: uchar outSignal;
+                // receive signal
+                fromFarmer :> uchar outSignal;
                 for( int y = 0; y < load; y++ ) {               // for every row excluding edge rows
                     for( int p = 0; p < NPKT; p++ ) {           // for each packet
                         fromFarmer <: rowVal[p][y];             // send to farmer (distributer)

@@ -46,13 +46,11 @@ int mod(int n,int x) {
 }
 
 uchar pack(int index, uchar byte, uchar c) {    // pack c into packet 'byte' at index 'index'
-    if (c == 0x0) {
-        byte &= ~(1 << index);
+    if (!c) { // if (c == 0x00)
+        return (byte & ~(1 << index));
     }
-    else if (c == 0xFF) {
-        byte |= (1 << index);
-    }
-    return byte;
+    // else if (c == 0xFF)
+    return (byte | (1 << index));
 }
 
 int unpack(int index, uchar byte) {             // unpack bit from index 'index' of packet 'byte'

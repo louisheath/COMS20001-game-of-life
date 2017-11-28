@@ -413,7 +413,7 @@ void worker(int id, chanend fromFarmer, chanend wLeft, chanend wRight)
 
                 for( int p = 0; p < NPKT; p++ ) {
                     // if we're at the last row, update it as the y loop is going to stop
-                    if (y == load + 1) rowVal[p][y - 1] = currRow[p];
+                    if (y == load) rowVal[p][y - 1] = currRow[p];
                     // if we're on at least the second row we no longer depend on prevRow and can output
                     else if (y > 1) {
                         rowVal[p][y - 1] = prevRow[p];                      // update non-overlapping rows

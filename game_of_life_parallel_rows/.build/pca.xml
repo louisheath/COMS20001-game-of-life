@@ -701,8 +701,10 @@
   <arg num="1" specialize="false">
     <values>
       <value type="unknown"/>
+      <value type="intval"><intval isSigned="true" val="0"/></value>
       <value type="intval"><intval isSigned="true" val="5"/></value>
       <value type="intval"><intval isSigned="true" val="17"/></value>
+      <value type="intval"><intval isSigned="true" val="-1"/></value>
     </values>
   </arg>
 </fInfo>
@@ -745,6 +747,7 @@
     <values>
       <value type="unknown"/>
       <value type="intval"><intval isSigned="true" val="0"/></value>
+      <value type="intval"><intval isSigned="true" val="1"/></value>
       <value type="intval"><intval isSigned="true" val="255"/></value>
     </values>
   </arg>
@@ -934,10 +937,6 @@
       <value type="intval"><intval isSigned="true" val="1"/></value>
       <value type="intval"><intval isSigned="true" val="2"/></value>
       <value type="intval"><intval isSigned="true" val="3"/></value>
-      <value type="intval"><intval isSigned="true" val="4"/></value>
-      <value type="intval"><intval isSigned="true" val="5"/></value>
-      <value type="intval"><intval isSigned="true" val="6"/></value>
-      <value type="intval"><intval isSigned="true" val="7"/></value>
     </values>
   </arg>
   <arg num="1" specialize="false">

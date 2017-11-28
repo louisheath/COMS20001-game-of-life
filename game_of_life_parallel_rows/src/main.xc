@@ -11,7 +11,7 @@
 
 #define  IMHT 16                  //image height
 #define  IMWD 16                  //image width
-#define  NWKS 8                   //number of workers
+#define  NWKS 4                   //number of workers
 #define  NPKT IMWD/8              //number of packets in a row
 
 typedef unsigned char uchar;      //using uchar as shorthand
@@ -317,6 +317,11 @@ void distributor(chanend c_in, chanend c_out, chanend c_control, in port b, out 
     }
 }
 
+/////////////////////////////////////////////////////////////////////////////////////////
+//
+// Count how many neighbouring cells are alive
+//
+/////////////////////////////////////////////////////////////////////////////////////////
 int getNeighbours(int x, int y, uchar rowVal[NPKT][IMHT / NWKS + 2]) {
     // variables used in finding neighbours
     int xRight = mod(IMWD, x+1);
@@ -385,17 +390,34 @@ void worker(int id, chanend fromFarmer, chanend wLeft, chanend wRight)
         if (s == 0) {
 
             // for sake of testing, get an output on 100th iteration
-            if (i == 99) {
+            if (i == 100) {
                 // tell distributor ready to output
                 if (id == 0) fromFarmer <: (uchar) 1;
                 // receive signal
                 fromFarmer :> uchar outSignal;
-                for( int y = 0; y < load; y++ ) {               // for every row excluding edge rows
+                for( int y = 1; y < load + 1; y++ ) {               // for every row excluding edge rows
                     for( int p = 0; p < NPKT; p++ ) {           // for each packet
                         fromFarmer <: rowVal[p][y];             // send to farmer (distributer)
                     }
                 }
             }
+
+            // TEST: write out packed world
+
+//            if (id == 1) {
+//                printf("Before processing %d\n",i);
+//                for( int y = 0; y < (IMHT / NWKS) + 2; y++ ) {
+//                    for( int p = 0; p < NPKT; p++ ) {
+//                        uchar packet = rowVal[p][y];
+//
+//                        // unpack each bit and add to output line
+//                        for ( int x = 0; x < 8; x++ ) {
+//                            printf( "-%4.1d ", unpack(x, packet) ); //show image values
+//                        }
+//                    }
+//                    printf( "\n" );
+//                }
+//            }
 
             numAlive = 0; //reset number of alive cells counter
 
@@ -429,14 +451,31 @@ void worker(int id, chanend fromFarmer, chanend wLeft, chanend wRight)
 
                 for( int p = 0; p < NPKT; p++ ) {
                     // if we're at the last row, update it as the y loop is going to stop
-                    if (y == load) rowVal[p][y - 1] = currRow[p];
+
                     // if we're on at least the second row we no longer depend on prevRow and can output
-                    else if (y > 1) {
+                    if (y > 1) {
                         rowVal[p][y - 1] = prevRow[p];                      // update non-overlapping rows
+                        if (y == load) rowVal[p][y] = currRow[p];
                     }
                     prevRow[p] = currRow[p];                                // move current processed row to previous row storage for writing next iteration
                 }
             }
+
+//            // TEST: write out packed world
+//            if (id == 1) {
+//                printf("After processing\n\n");
+//                for( int y = 0; y < (IMHT / NWKS) + 2; y++ ) {
+//                    for( int p = 0; p < NPKT; p++ ) {
+//                        uchar packet = rowVal[p][y];
+//
+//                        // unpack each bit and add to output line
+//                        for ( int x = 0; x < 8; x++ ) {
+//                            printf( "-%4.1d ", unpack(x, packet) ); //show image values
+//                        }
+//                    }
+//                    printf( "\n" );
+//                }
+//            }
 
             /*
             Update ghost row states for next iteration by communicating with other workers
@@ -451,10 +490,10 @@ void worker(int id, chanend fromFarmer, chanend wLeft, chanend wRight)
             if (id % 2 == 1) { // odd numbered workers
                 // 1. send to left
                 for ( int p = 0; p < NPKT; p++ )
-                    wLeft <: rowVal[p][0];
+                    wLeft <: rowVal[p][1];
                 // 2. send to right
                 for ( int p = 0; p < NPKT; p++ )
-                    wRight <: rowVal[p][load - 1];
+                    wRight <: rowVal[p][load];
                 // 3. receive from left
                 for ( int p = 0; p < NPKT; p++ )
                     wLeft :> rowVal[p][0];
@@ -471,10 +510,10 @@ void worker(int id, chanend fromFarmer, chanend wLeft, chanend wRight)
                     wLeft :> rowVal[p][0];
                 // 3. send to right
                 for ( int p = 0; p < NPKT; p++ )
-                    wRight <: rowVal[p][load - 1];
+                    wRight <: rowVal[p][load];
                 // 4. send to left
                 for ( int p = 0; p < NPKT; p++ )
-                    wLeft <: rowVal[p][0];
+                    wLeft <: rowVal[p][1];
             }
 
             //increment iteration counter
@@ -492,7 +531,7 @@ void worker(int id, chanend fromFarmer, chanend wLeft, chanend wRight)
         // case where SW2 is pressed and game needs to be output
         else if (s == 2) {
             // Send new cell states to farmer for combining
-            for( int y = 0; y < load; y++ ) {               // for every row excluding edge rows
+            for( int y = 1; y < load + 1; y++ ) {               // for every row excluding edge rows
                 for( int p = 0; p < NPKT; p++ ) {           // for each packet
                     fromFarmer <: rowVal[p][y];             // send to farmer (distributer)
                 }
@@ -604,6 +643,8 @@ void tests() {
     assert(NPKT == IMWD/8);
     assert(mod(2,5) == 1);
     assert(mod(8, 17) == 1);
+    assert(mod(8, -1) == 7);
+    assert(mod(8, 0) == 0);
     assert(5 / 2 == 2);                 // checking that division rounds down
     //
     // Testing packing
@@ -612,6 +653,9 @@ void tests() {
     assert(pack(7, 0x00, 0xFF) == 0x80);
     assert(pack(0, 0x00, 0xFF) == 0x01);
     assert(pack(0, 0xFF, 0x00) == 0xFE);
+    assert(pack(0, 0x00, 0x00) == 0x00);
+    assert(pack(7, 0xFF, 0x00) == 0x7F);
+    assert(pack(0, 0x01, 0x00) == 0x00);
     //
     // Testing unpacking with 11100110
     //

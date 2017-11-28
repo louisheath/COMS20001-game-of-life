@@ -226,10 +226,14 @@ void distributor(chanend c_in, chanend c_out, chanend c_control, in port b, out 
     }
 
     // game runs infinitely
-    while (1){
+    while (1) {
         // loop whilst SW2 hasn't been pressed
-        while (button != 13){
+        while (button != 13) {
             select {
+                // if worker 0 tell us we are at the 100th iteration
+                case worker[0] :> uchar x:
+                    button = 13;
+                    break;
                 // if timer gives us the current time, pause
                 case reqTime :> timeTaken:
                     // display red pause LED
@@ -379,6 +383,20 @@ void worker(int id, chanend fromFarmer, chanend wLeft, chanend wRight)
         fromFarmer :> s; //receive signal from dist
         // default case: run iteration
         if (s == 0) {
+
+            // for sake of testing, get an output on 100th iteration
+            if (i == 99) {
+                // tell distributor ready to output
+                if (id == 0) fromFarmer <: (uchar) 1;
+                // send output
+                fromFarmer <: uchar outSignal;
+                for( int y = 0; y < load; y++ ) {               // for every row excluding edge rows
+                    for( int p = 0; p < NPKT; p++ ) {           // for each packet
+                        fromFarmer <: rowVal[p][y];             // send to farmer (distributer)
+                    }
+                }
+            }
+
             numAlive = 0; //reset number of alive cells counter
 
             // Look at neighbouring cells and work out the next state of each cell
@@ -420,7 +438,7 @@ void worker(int id, chanend fromFarmer, chanend wLeft, chanend wRight)
                 }
             }
 
-           /*
+            /*
             Update ghost row states for next iteration by communicating with other workers
             as well as send ghost row states for other workers to use
             e.g: four workers:
@@ -428,43 +446,42 @@ void worker(int id, chanend fromFarmer, chanend wLeft, chanend wRight)
                w0      w1 ---> w2      w3 --->
                w0 ---> w1      w2 ---> w3
                w0      w1 <--- w2      w3 <---
-           */
+            */
 
-           if (id % 2 == 1) { // odd numbered workers
-               // 1. send to left
-               for ( int p = 0; p < NPKT; p++ )
-                   wLeft <: rowVal[p][0];
+            if (id % 2 == 1) { // odd numbered workers
+                // 1. send to left
+                for ( int p = 0; p < NPKT; p++ )
+                    wLeft <: rowVal[p][0];
+                // 2. send to right
+                for ( int p = 0; p < NPKT; p++ )
+                    wRight <: rowVal[p][load - 1];
+                // 3. receive from left
+                for ( int p = 0; p < NPKT; p++ )
+                    wLeft :> rowVal[p][0];
+                // 4. receive from right
+                for ( int p = 0; p < NPKT; p++ )
+                    wRight :> rowVal[p][load + 1];
+            }
+            else {             // even numbered workers
+                // 1. receive from right
+                for ( int p = 0; p < NPKT; p++ )
+                    wRight :> rowVal[p][load + 1];
+                // 2. receive from left
+                for ( int p = 0; p < NPKT; p++ )
+                    wLeft :> rowVal[p][0];
+                // 3. send to right
+                for ( int p = 0; p < NPKT; p++ )
+                    wRight <: rowVal[p][load - 1];
+                // 4. send to left
+                for ( int p = 0; p < NPKT; p++ )
+                    wLeft <: rowVal[p][0];
+            }
 
-               // 2. send to right
-               for ( int p = 0; p < NPKT; p++ )
-                   wRight <: rowVal[p][load - 1];
-               // 3. receive from left
-               for ( int p = 0; p < NPKT; p++ )
-                   wLeft :> rowVal[p][0];
-               // 4. receive from right
-               for ( int p = 0; p < NPKT; p++ )
-                   wRight :> rowVal[p][load + 1];
-           }
-           else {             // even numbered workers
-               // 1. receive from right
-               for ( int p = 0; p < NPKT; p++ )
-                   wRight :> rowVal[p][load + 1];
-               // 2. receive from left
-               for ( int p = 0; p < NPKT; p++ )
-                   wLeft :> rowVal[p][0];
-               // 3. send to right
-               for ( int p = 0; p < NPKT; p++ )
-                   wRight <: rowVal[p][load - 1];
-               // 4. send to left
-               for ( int p = 0; p < NPKT; p++ )
-                   wLeft <: rowVal[p][0];
-           }
-
-           //increment iteration counter
-           i++;
+            //increment iteration counter
+            i++;
         }
         // case where board is tilted and status print is required
-        else if (s == 1){
+        else if (s == 1) {
             // send number of currently alive cells
             fromFarmer <: numAlive;
             // if you're the last worker, send the loop iteration
@@ -473,7 +490,7 @@ void worker(int id, chanend fromFarmer, chanend wLeft, chanend wRight)
             fromFarmer :> uchar unpause;
         }
         // case where SW2 is pressed and game needs to be output
-        else if (s == 2){
+        else if (s == 2) {
             // Send new cell states to farmer for combining
             for( int y = 0; y < load; y++ ) {               // for every row excluding edge rows
                 for( int p = 0; p < NPKT; p++ ) {           // for each packet

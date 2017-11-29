@@ -62,7 +62,7 @@ int unpack(int index, uchar byte) {
 }
 
 // function that constantly tracks processing time and checks for clock overflow
-void checkTime(chanend dstr, chanend tilt) {
+void checkTime(chanend dstr) {
     // timer variables. timer ticks at 100MHz, 100000 ticks is 1ms.
     timer t;
     uint32_t prev,
@@ -75,27 +75,17 @@ void checkTime(chanend dstr, chanend tilt) {
     // receive signal to start timing
     dstr :> uchar x;
     t :> prev;
-    //printf("Timer starting\n");
 
     while (1) {
-        // Timer isn't paused so increment and wait for output request
         while (!paused){
-
             [[ordered]]
             select {
-                case dstr :> uchar x:    // check to see if distributer wants the time
-                    if (x == 1) {
-                        dstr <: timeTaken;
-                        paused = 1;     // pause while distributer outputs
-                    }
+                // if distributor says pause
+                case dstr :> uchar pause:
+                    dstr <: timeTaken;
+                    paused = 1;     // pause while distributer outputs
                     break;
-                case tilt :> uchar x:  // check to see if board is tilted and timing should pause.
-                    if (x == 1) {
-                        paused = 1;
-                        dstr <: timeTaken;   // tell distributer to pause
-                        printf("Timer paused\n");
-                    }
-                    break;
+                // else keep checking for overflow
                 default:
                     t :> curr;
 
@@ -103,31 +93,17 @@ void checkTime(chanend dstr, chanend tilt) {
                     if (prev > curr) timeTaken += 42950;
                     // increment change in time
                     timeTaken += curr / 100000;
-                    timeTaken -=  prev / 100000;
+                    timeTaken -= prev / 100000;
 
                     prev = curr;
                     break;
             }
         }
 
-        // Timer is paused, wait for permission to unpause
-        select {
-            case tilt :> uchar x:  // if board is untilted
-                if (x == 0) {
-                    paused = 0;
-                    t :> prev;
-                    dstr <: (uchar) 0;   // tell distributer to unpause
-                    printf("Timer unpaused by tilt\n");
-                }
-                break;
-            case dstr :> uchar x:    // if distributer has finished outputting and wants to resume
-                if (x == 0) {
-                    paused = 0;
-                    t :> prev;
-                    printf("Timer unpaused by dist\n");
-                }
-                break;
-        }
+        // wait until distributer says to resume
+        dstr :> uchar resume;
+        paused = 0;
+        t :> prev;
     }
 }
 
@@ -180,7 +156,7 @@ void DataInStream(char infname[], chanend c_out)
 //             and sends new world to DataStreamOut
 //
 /////////////////////////////////////////////////////////////////////////////////////////
-void distributor(chanend c_in, chanend c_out, chanend c_control, in port b, out port LEDs, chanend worker[NWKS], chanend time)
+void distributor(chanend c_in, chanend c_out, chanend tilt, chanend worker[NWKS], chanend time, in port b, out port LEDs)
 {
     // run unit tests
     tests();
@@ -192,7 +168,9 @@ void distributor(chanend c_in, chanend c_out, chanend c_control, in port b, out 
     int button = 0;           // button input from board/button listener
     uchar flashState = 0;     // state of flashing seperate green LED
 
-    // variables for output when paused
+    // variables for pausing
+    int tilted = 0;           // tilt state
+    int output = 0;           // whether game should be output
     uint32_t timeTaken;       // time taken to process image
     int numAlive = 0;         // number of alive cells at pause
     int i = 0;                // current iteration
@@ -229,98 +207,111 @@ void distributor(chanend c_in, chanend c_out, chanend c_control, in port b, out 
     }
 
     // Start detecting tilts
-    c_control <: (uchar) 1;
+    tilt <: (uchar) 1;
     // Start timing
     time <: (uchar) 0;
 
     // game runs infinitely
     while (1) {
-        // loop whilst SW2 hasn't been pressed
-        while (button != 13) {
+        // while not paused, keep workers working and check for pauses
+        while (!tilted && !output) {
             select {
-                // if timer gives us the current time, pause
-                case time :> timeTaken:
-                    // display red pause LED
-                    LEDs <: (uchar) 8;
-                    // send signal to worker for pausing
-                    for (int w = 0; w < NWKS; w++) worker[w] <: (uchar) 1;
-                    printf("Told workers to pause/n");
-                    // recieve number of alive cells from each worker
-                    for(int w = 0; w < NWKS; w++) {
-                        int x; // temporary storage of number of alive cells value from workers
-                        worker[w] :> x;
-                        numAlive += x;
+                case tilt :> int x:
+                    tilted = 1;
+                    printf("tilted\n");
+
+                    break;
+                default:
+                    // check for SW2
+                    b :> button;
+                    if (button == 13) {
+                        output = 1;
+                        break;
                     }
 
-                    printf("Status Report:\n"
-                           " Number of rounds processed: %d\n"
-                           " Current number of live cells: %d\n"
-                           " Processing time elapsed: %dms\n", i, numAlive, timeTaken);
-                    // wait until unpause
-                    time :> uchar resume;
-                    numAlive = 0; // reset alive cell counter
-                    break;
-                // otherwise tell workers to work and check for new button input
-                default:
-                    // read button input, if any
-                    b :> button;
-                    // send signal to worker for processing
+                    // start next iteration
                     for(int w = 0; w < NWKS; w++) {
-                        worker[w] <: (uchar) 0;
+                        worker[w] <: (uchar) 0; // zero indicates work
                     }
-                    // increment iteration number
                     i++;
-                    // flash processing LED via state change
+                    if (i == 100) {
+                        output = 1;
+                        break;
+                    }
+
+                    // flash green LED
                     flashState ^= 1;
                     LEDs <: flashState;
+
                     break;
             }
-            // if we've just triggered the 100th iteration, output game state
-            if (i == 100) {
-                break;
-            }
         }
 
-        /* SW2 pressed / target iteration hit, produce output */
+        /* game paused, either produce output or print update */
 
-        // send signal to worker for outputting
-        // must be done before receive values to prevent other workers
-        for(int w = 0; w < NWKS; w++) {
-            worker[w] <: (uchar) 2;
+        // send signal to worker for pausing, indicating the form of output
+        uchar signal;
+        if (tilted) signal = 1;     // 1 returns numAlive
+        else        signal = 2;     // 2 returns game state
+        for (int w = 0; w < NWKS; w++) {
+            worker[w] <: signal;
         }
 
-        // pause timer and receive timeTaken
+        // tell timer to pause
         time <: (uchar) 1;
-        printf("Paused timer\n");
         time :> timeTaken;
-        printf("Got timeTaken\n");
+        printf("Paused at %dms\n", timeTaken);
 
-        printf("Processing: Outputting after %dms\n", timeTaken);
-        LEDs <: 2; // send blue LED to be lit
+        // update LEDs
+        if (tilted) LEDs <: 8;  // red
+        else        LEDs <: 2;  // blue
 
-        // tell DataOutStream to open an output file
-        //   this is necessary to prevent the previous file being corrupted
-        c_out <: (uchar) 1;
+        // run logic for printing / outputting
+        if (tilted) {
+            // receive number of alive cells from each worker
+            int temp;
+            for (int w = 0; w < NWKS; w++) {
+                worker[w] :> temp;
+                numAlive += temp;
+            }
 
-        // Receive processed cells from workers
-        for(int w = 0; w < NWKS; w++) {                   // for each of the workers
-            for(int y = 0; y < ((IMHT / NWKS)); y++ ) {   // for each row that will be used in new array (edge rows not returned)
-                int row = y + (w*(IMHT / NWKS));
-                for( int p = 0; p < NPKT; p++ ) {         // for every packet
-                   // receive cell values from worker and place into new world array
-                   worker[w] :> val[p][row];
-                   // send the packet to DataOut
-                   c_out <: val[p][row];
+            printf("Status Report:\n"
+                   " Number of rounds processed: %d\n"
+                   " Current number of live cells: %d\n"
+                   " Processing time elapsed: %dms\n", i, numAlive, timeTaken);
+
+            // wait until we're untilted
+            tilt :> int x;
+            tilted = 0;
+
+            numAlive = 0;
+        }
+        else {
+            // tell DataOutStream to open an output file
+            //   this is necessary to prevent the previous file being corrupted
+            c_out <: (uchar) 1;
+
+            // Receive processed cells from workers
+            for(int w = 0; w < NWKS; w++) {                   // for each of the workers
+                for(int y = 0; y < ((IMHT / NWKS)); y++ ) {   // for each row that will be used in new array (edge rows not returned)
+                    int row = y + (w*(IMHT / NWKS));
+                    for( int p = 0; p < NPKT; p++ ) {         // for every packet
+                       // receive cell values from worker and place into new world array
+                       worker[w] :> val[p][row];
+                       // send the packet to DataOut
+                       c_out <: val[p][row];
+                    }
                 }
             }
+
+            output = 0;
         }
 
-        // indicate end of output, turn off blue LED
-        LEDs <: 0;
-        printf("Outputted\n");
+        // resume timer
+        time <: (uchar) 1;
 
-        // unpause timer and reset button input for next iteration
-        time <: (uchar) 0;
+        // prepare for next iteration
+        LEDs <: 0;
         b :> button;
     }
 }
@@ -369,7 +360,7 @@ int getNeighbours(int x, int y, uchar rowVal[NPKT][IMHT / NWKS + 2]) {
 // Initialise workers to process given rows of cells
 //
 /////////////////////////////////////////////////////////////////////////////////////////
-void worker(int id, chanend fromFarmer, chanend wLeft, chanend wRight)
+void worker(int id, chanend dstr, chanend wLeft, chanend wRight)
 {
     // number of rows worker is processing (excluding ghost rows)
     int load = IMHT / NWKS;
@@ -385,7 +376,7 @@ void worker(int id, chanend fromFarmer, chanend wLeft, chanend wRight)
     for( int y = 0; y < (load + 2); y++ ) {     // for every row to be input
         for( int x = 0; x < NPKT; x++ ) {         // for every column
             // read in rows cell by cell from distributer to be worked on
-            fromFarmer :> rowVal[x][y];
+            dstr :> rowVal[x][y];
         }
     }
 
@@ -393,7 +384,7 @@ void worker(int id, chanend fromFarmer, chanend wLeft, chanend wRight)
     // game runs infinitely
     while (1) {
         // receive signal from dist
-        fromFarmer :> s;
+        dstr :> s;
         // default case: run iteration
         if (s == 0) {
             // reset number of alive cells counter
@@ -481,16 +472,14 @@ void worker(int id, chanend fromFarmer, chanend wLeft, chanend wRight)
         // case where board is tilted and status print is required
         else if (s == 1) {
             // send number of currently alive cells
-            fromFarmer <: numAlive;
-            // wait for unpause signal to proceed
-            fromFarmer :> uchar unpause;
+            dstr <: numAlive;
         }
         // case where SW2 is pressed and game info needs to be output
         else if (s == 2) {
             // Send new cell states to farmer for combining
             for( int y = 1; y < load + 1; y++ ) {               // for every row excluding edge rows
                 for( int p = 0; p < NPKT; p++ ) {           // for each packet
-                    fromFarmer <: rowVal[p][y];             // send to farmer (distributor)
+                    dstr <: rowVal[p][y];             // send to farmer (distributor)
                 }
             }
         }
@@ -546,12 +535,13 @@ void DataOutStream(char outfname[], chanend c_in)
     return;
 }
 
+
 /////////////////////////////////////////////////////////////////////////////////////////
 //
 // Initialise and  read orientation, send first tilt event to channel
 //
 /////////////////////////////////////////////////////////////////////////////////////////
-void orientation( client interface i2c_master_if i2c, chanend dist, chanend toTimer) {
+void orientation( client interface i2c_master_if i2c, chanend dstr) {
     i2c_regop_res_t result;
     char status_data = 0;
     int tilted = 0;
@@ -569,7 +559,7 @@ void orientation( client interface i2c_master_if i2c, chanend dist, chanend toTi
     }
 
     // wait for start signal from distributor
-    dist :> uchar x;
+    dstr :> uchar x;
 
     //Probe the orientation x-axis forever
     while (1) {
@@ -585,15 +575,16 @@ void orientation( client interface i2c_master_if i2c, chanend dist, chanend toTi
       if (!tilted) {
           if (x>30) {
               tilted = 1;
-              toTimer <: (uchar) 1;
+              dstr <: 1;
           }
       }
       else if (x<10) {
           tilted = 0;
-          toTimer <: (uchar) 0;
+          dstr <: 0;
       }
     }
 }
+
 
 // Unit tests
 void tests() {
@@ -646,24 +637,24 @@ void tests() {
 //
 /////////////////////////////////////////////////////////////////////////////////////////
 int main(void) {
+    // Interfaces
     i2c_master_if i2c[1];                          // interface to orientation sensor
 
     // Channel definitions
-    chan c_inIO,     // DataStreamIn
-         c_outIO,    // DataStreamOut
-         c_control,  // communication between orientation and distributor
+    chan inIO,       // DataStreamIn
+         outIO,      // DataStreamOut
+         tilt,       // communication between orientation and distributor
          WtoD[NWKS], // Workers to Distributer
          WtoW[NWKS], // Workers to Workers
-         reqTime,    // request time
-         pauseTime;  // pause time
+         time;       // request time
 
     par {
         on tile[0] : i2c_master(i2c, 1, p_scl, p_sda, 10);                                  //server thread providing orientation data
-        on tile[0] : orientation(i2c[0], c_control, pauseTime);                             //client thread reading orientation data
-        on tile[0] : DataInStream("64x64.pgm", c_inIO);                                     //thread to read in a PGM image
-        on tile[0] : DataOutStream("64x64out.pgm", c_outIO);                                //thread to write out a PGM image
-        on tile[0] : distributor(c_inIO, c_outIO, c_control, buttons, leds, WtoD, reqTime); // farmer
-        on tile[0] : checkTime(reqTime, pauseTime);
+        on tile[0] : orientation(i2c[0], tilt);                             //client thread reading orientation data
+        on tile[0] : DataInStream("64x64.pgm", inIO);                                     //thread to read in a PGM image
+        on tile[0] : DataOutStream("64x64out.pgm", outIO);                                //thread to write out a PGM image
+        on tile[0] : distributor(inIO, outIO, tilt, WtoD, time, buttons, leds); // farmer
+        on tile[0] : checkTime(time);
         // initialise workers
         par (int i = 0; i < (NWKS) ; i++){
             on tile[1] : worker((i+1) % NWKS, WtoD[(i+1) % NWKS], WtoW[i], WtoW[(i+1) % NWKS]);

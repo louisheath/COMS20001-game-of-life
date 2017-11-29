@@ -9,12 +9,12 @@
 #include "i2c.h"
 #include <assert.h>
 
-#define  IMHT 512                  //image height
-#define  IMWD 512                  //image width
+#define  IMHT 1024                  //image height
+#define  IMWD 1024                  //image width
 #define  NWKS 8                   //number of workers
 #define  NPKT IMWD/8              //number of packets in a row
 
-#define  printAt 100
+#define  printAt 2
 
 typedef unsigned char uchar;      //using uchar as shorthand
 
@@ -236,7 +236,7 @@ void distributor(chanend c_in, chanend c_out, chanend tilt, chanend worker[NWKS]
                         worker[w] <: 0; // zero indicates work
                     }
                     i++;
-                    if (i == printAt) {
+                    if (i == 2 || i == 100) {
                         output = 1;
                         break;
                     }
@@ -648,8 +648,8 @@ int main(void) {
     par {
         on tile[0] : i2c_master(i2c, 1, p_scl, p_sda, 10);                                  //server thread providing orientation data
         on tile[0] : orientation(i2c[0], tilt);                             //client thread reading orientation data
-        on tile[0] : DataInStream("512x512.pgm", inIO);                                     //thread to read in a PGM image
-        on tile[0] : DataOutStream("512x512out.pgm", outIO);                                //thread to write out a PGM image
+        on tile[0] : DataInStream("1024x1024.pgm", inIO);                                     //thread to read in a PGM image
+        on tile[0] : DataOutStream("1024x1024out.pgm", outIO);                                //thread to write out a PGM image
         on tile[0] : distributor(inIO, outIO, tilt, WtoD, time, buttons, leds); // farmer
         on tile[0] : checkTime(time);
         // initialise workers

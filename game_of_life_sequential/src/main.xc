@@ -37,25 +37,24 @@ out port leds = XS1_PORT_4F;   //port to access xCore-200 LEDs
 // modulo function that works with negatives
 int mod(int n,int x) {
     while (x < 0) x += n;
-    return (x % n);
+    return x % n;
 }
 
 uchar pack(int index, uchar byte, uchar c) {    // pack c into packet 'byte' at index 'index'
-    if (c == 0x0) {
+    if (c == 0x00) {
         byte &= ~(1 << index);
     }
     else if (c == 0xFF) {
         byte |= (1 << index);
     }
     return byte;
-}
 
 int unpack(int index, uchar byte) {             // unpack bit from index 'index' of packet 'byte'
     return (byte >> index) & 1;
 }
 
 // function that constantly tracks processing time and checks for clock overflow
-void checkTime(chanend req, chanend pause) {
+void checkTime(chanend dstr) {
     // timer variables. timer ticks at 100MHz, 100000 ticks is 1ms.
     timer t;
     uint32_t prev,
@@ -66,60 +65,37 @@ void checkTime(chanend req, chanend pause) {
     int paused = 0;
 
     // receive signal to start timing
-    req :> uchar x;
+    dstr :> int x;
     t :> prev;
-    //printf("Timer starting\n");
 
     while (1) {
-        // Timer isn't paused so increment and wait for output request
         while (!paused){
-
             [[ordered]]
             select {
-                case req :> uchar x:    // check to see if distributer wants the time
-                    if (x == 1) {
-                        req <: timeTaken;
-                        paused = 1;     // pause while distributer outputs
-                    }
+                // if distributor says pause
+                case dstr :> int pause:
+                    dstr <: timeTaken;
+                    paused = 1;     // pause while distributer outputs
                     break;
-                case pause :> uchar x:  // check to see if board is tilted and timing should pause.
-                    if (x == 1) {
-                        paused = 1;
-                        req <: timeTaken;   // tell distributer to pause
-                        printf("Timer paused\n");
-                    }
-                    break;
+                // else keep checking for overflow
                 default:
                     t :> curr;
 
-                    // increment change in time
-                    timeTaken += curr / 100000;
-                    timeTaken -=  prev / 100000;
                     // if overflow is hit, curr is 42950 too small. Compensate.
                     if (prev > curr) timeTaken += 42950;
+                    // increment change in time
+                    timeTaken += curr / 100000;
+                    timeTaken -= prev / 100000;
+
                     prev = curr;
                     break;
             }
         }
 
-        // Timer is paused, wait for permission to unpause
-        select {
-            case pause :> uchar x:  // if board is untilted
-                if (x == 0) {
-                    paused = 0;
-                    t :> prev;
-                    req <: (uchar) 0;   // tell distributer to unpause
-                    printf("Timer unpaused by tilt\n");
-                }
-                break;
-            case req :> uchar x:    // if distributer has finished outputting and wants to resume
-                if (x == 0) {
-                    paused = 0;
-                    t :> prev;
-                    printf("Timer unpaused by dist\n");
-                }
-                break;
-        }
+        // wait until distributer says to resume
+        dstr :> int resume;
+        paused = 0;
+        t :> prev;
     }
 }
 
@@ -168,36 +144,25 @@ void DataInStream(char infname[], chanend c_out)
  * We need to ask Tilo if this array parameter is copying the array every time, and if so how to point
  */
 int getNeighbours(int x, int y, uchar rowVal[NPKT][IMHT]) {
-    // variables used in finding neighbours
-    int xRight  = mod(IMWD, x+1);
-    int xLeft   = mod(IMWD, x-1);
-    int yUp     = mod(IMHT, y-1);
-    int yDown   = mod(IMHT, y+1);
-
-    // coordinates for neighbours
-    int nCoords[8][2] = {
-            {xLeft, yUp},   {x, yUp},   {xRight, yUp},
-            {xLeft, y},                 {xRight, y},
-            {xLeft, yDown}, {x, yDown}, {xRight, yDown}
-    };
-
-    // store states of neighbours in array
-    int neighbours[8];
-
-    // e.g. 26th bit is going to be the 3rd bit of the 4th packet
-    //      in this case b = 3, p = 4
-    int b, p;
-    for (int n = 0; n < 8; n++) {   // for each neighbour
-        b = mod(8, nCoords[n][0]);
-        p = nCoords[n][0] / 8;
-        neighbours[n] = unpack(b, rowVal[p][nCoords[n][1]]);
-    }
-
-    // count number of alive neighbours
+    // counter for number of alive neighbours
     int alive = 0;
-    for (int i = 0; i < 8; i++) {
-        if (neighbours[i] == 1) alive++;
+    int b, p; // an x coordinate is the bth bit in the pth packet
+
+    for (int i = -1; i < 2; i++) {
+        int xN = mod(IMWD, x + i);  // x coordinate of each neighbour cell
+
+        for (int j = -1; j < 2; j++) {
+            int yN = y + j;
+
+            if (j != 0 || i != 0) { // when j == i == 0, x == xN and y == yN. avoid.
+                b = mod(8, xN);      // get index in block of 8 bits
+                p = xN / 8;          // get in which block of 8 bits we're processing
+
+                if (unpack(b, rowVal[p][yN]) == 1) alive++;; //unpack neighbour value and find out if it's alive
+            }
+        }
     }
+
     return alive;
 }
 
@@ -208,20 +173,28 @@ int getNeighbours(int x, int y, uchar rowVal[NPKT][IMHT]) {
 // Currently the function just inverts the image
 //
 /////////////////////////////////////////////////////////////////////////////////////////
-void distributor(chanend c_in, chanend c_out, chanend c_control, in port b, out port LEDs, chanend reqTime) {
+void distributor(chanend c_in, chanend c_out, chanend tilt, chanend time, in port b, out port LEDs)
+{
+    // run unit tests
+    tests();
+
+    // game state
+    uchar val[NPKT][IMHT];
+
+    // arrays for storing processed rows
+    uchar prevRow[NPKT];
+    uchar currRow[NPKT];
 
     // variables for hardware control
     int button = 0;           // button input from board/button listener
     uchar flashState = 0;     // state of flashing seperate green LED
 
-    // game states before and after processing
-    uchar val[NPKT][IMHT];
-    uchar newVal[NPKT][IMHT];
-
-    // variables for output when paused
+    // variables for pausing
+    int tilted = 0;           // tilt state
+    int output = 0;           // whether game should be output
     uint32_t timeTaken;       // time taken to process image
-    int i = 0;                // iteration counter
-    int numAlive = 0;         // number of alive workers at current iteration
+    int numAlive = 0;         // number of alive cells at pause
+    int i = 0;                // current iteration
 
     // prompt user for start button
     printf( "ProcessImage: Start, size = %dx%d\n", IMHT, IMWD );
@@ -244,94 +217,125 @@ void distributor(chanend c_in, chanend c_out, chanend c_control, in port b, out 
         }
     }
 
-    // Inform orientation to start detecting tilts
-    c_control <: (uchar) 1;
+    // Start detecting tilts
+    tilt <: 1;
     // Start timing
-    reqTime <: (uchar) 0;
+    time <: 1;
 
     // game runs infinitely
     while (1) {
-
-        // loop whilst SW2 hasn't been pressed
-        while (button != 13) {
+        // while not paused, keep workers working and check for pauses
+        while (!tilted && !output) {
             select {
-                case reqTime :> timeTaken:
-                    LEDs <: (uchar) 8;
-                    printf("Status Report:\n"
-                           " Number of rounds processed: %d\n"
-                           " Current number of live cells: %d\n"
-                           " Processing time elapsed: %d\n", i, numAlive, timeTaken);
-                    // wait until unpause
-                    reqTime :> uchar resume;
+                case tilt :> int x:
+                    tilted = 1;
+                    printf("tilted\n");
                     break;
                 default:
-                    // read button input, if any
+                    // check for SW2
                     b :> button;
+                    if (button == 13) {
+                        output = 1;
+                        break;
+                    }
 
-                    // reset alive cell counter
+                    // reset number of alive cells counter
                     numAlive = 0;
 
-                    // flash processing LED via state change
-                    flashState ^= 1;
-                    LEDs <: flashState;
-
-                    for( int y = 0; y < IMHT; y++ ) {   //go through all lines
-                        for( int p = 0; p < NPKT; p++ ) { //go through each packet per line
-                            // packet for new cell values, assume all eight alive to start
+                    // Look at neighbouring cells and work out the next state of each cell
+                    for( int y = 1; y < IMHT + 1; y++ ) {              // for every row excluding ghost rows
+                        for( int p = 0; p < NPKT; p++ ) {              //   and the packets in them
+                            // packet for new cell values, start with all alive
                             uchar newP = 0xFF;
                             numAlive += 8;
 
-                            for ( int x = 0; x < 8; x++ ) { // go through each pixel in the packet
-
+                            for ( int x = 0; x < 8; x++) {             // for every bit in the current packet
                                 // get number of alive neighbours
-                                int alive = getNeighbours(x + p*8, y, val);
+                                int alive = getNeighbours(x + p*8, y, rowVal);
 
                                 // If currently alive
-                                if (unpack(x, val[p][y]) == 1) {
+                                if (unpack(x, rowVal[p][y]) == 1) {
                                     // If number of alive neighbours isn't two or three, die. Else stay alive by default
                                     if (alive != 2 && alive != 3){
-                                       newP = pack(x, newP, 0x0);
-                                       numAlive--;
+                                        newP = pack(x, newP, 0x0);
+                                        numAlive--;
                                     }
                                 }
                                 // Else cell is currently dead: if not exactly three alive neighbours stay dead
                                 else if (alive != 3){
-                                   newP = pack(x, newP, 0x0);
-                                   numAlive--;
+                                    newP = pack(x, newP, 0x0);
+                                    numAlive--;
                                 }
                             }
-                            newVal[p][y] = newP;
+                            currRow[p] = newP;
+                        }
+
+                        for( int p = 0; p < NPKT; p++ ) {
+                            // if we're on at least the second row we no longer depend on prevRow and can output
+                            if (y > 1) {
+                                rowVal[p][y - 1] = prevRow[p];                      // update non-overlapping rows
+                                // if we're at the last row, update it as the y loop is going to stop
+                                if (y == IMHT) rowVal[p][y] = currRow[p];
+                            }
+                            prevRow[p] = currRow[p];                                // move current processed row to previous row storage for writing next iteration
                         }
                     }
 
-                    for( int y = 0; y < IMHT; y++ ) {   //go through all lines
-                        for( int p = 0; p < NPKT; p++ ) { //go through each pixel per line
-                          val[p][y] = newVal[p][y];                   //transfer new pixels to old array
-                        }
-                    }
-                    //printf( "\nOne processing round completed...\n" );
-
-                    //Increment iteration
                     i++;
+                    if (i == 2 || i == 100) {
+                        output = 1;
+                        break;
+                    }
+
+                    // flash green LED
+                    flashState ^= 1;
+                    LEDs <: flashState;
+
                     break;
             }
         }
 
-        /* SW2 pressed, produce output */
+        // tell timer to pause
+        time <: 1;
+        time :> timeTaken;
+        printf("Paused at %dms\n", timeTaken);
 
-        reqTime <: (uchar) 1; // request timeTaken from timer, also pausing it
-        printf("SW2 pressed, asked timer for time and paused it\n");
-        reqTime :> timeTaken; // store returned time
-        printf("Got timeTaken\n");
+        // update LEDs
+        if (tilted) LEDs <: 8;  // red
+        else        LEDs <: 2;  // blue
 
-        printf("Processing: Outputting after %dms\n", timeTaken);
+        // run logic for printing / outputting
+        if (tilted) {
 
-        LEDs <: 2; // send blue LED to be lit
+            printf("Status Report:\n"
+                   " Number of rounds processed: %d\n"
+                   " Current number of live cells: %d\n"
+                   " Processing time elapsed: %dms\n", i, numAlive, timeTaken);
 
-        // tell DataOutStream to open an output file
-        //   this is necessary to prevent the previous file being corrupted
-        c_out <: (uchar) 1;
+            // wait until we're untilted
+            tilt :> int x;
+            tilted = 0;
+        }
+        else {
+            // tell DataOutStream to open an output file
+            //   this is necessary to prevent the previous file being corrupted
+            c_out <: (uchar) 1;
+            // Send processed data to DataOutStream
+            for(int y = 0; y < IMHT; y++ ) {
+                for( int p = 0; p < NPKT; p++ ) { // for every packet
+                    c_out <: newVal[p][y];           // send cell information to DataOutStream
+                }
+            }
 
+            output = 0;
+        }
+
+        // resume timer
+        time <: 1;
+
+        // prepare for next iteration
+        LEDs <: 0;
+        b :> button;
         // Send processed data to DataOutStream
         for(int y = 0; y < IMHT; y++ ) {
             for( int p = 0; p < NPKT; p++ ) { // for every packet

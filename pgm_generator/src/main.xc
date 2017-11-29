@@ -7,8 +7,8 @@
 #include "pgmIO.h"
 #include "i2c.h"
 
-#define  IMHT 1024                  //image height
-#define  IMWD 1024                  //image width
+#define  IMHT 1192                  //image height
+#define  IMWD 1192                  //image width
 
 typedef unsigned char uchar;      //using uchar as shorthand
 
@@ -53,14 +53,14 @@ void work(chanend c_out) {
     uchar D = 0x0;  // dead
 
     uchar layout[8][8] = {
-                {D, D, D, D, D, D, D, D},
-                {D, D, D, D, D, D, D, D},
-                {D, D, D, D, D, D, D, D},
-                {D, D, D, A, D, D, D, D},
-                {D, D, D, D, A, D, D, D},
-                {D, D, A, A, A, D, D, D},
-                {D, D, D, D, D, D, D, D},
-                {D, D, D, D, D, D, D, D}
+                {D, D, D, A, A, D, D, D},
+                {D, D, A, A, A, A, D, D},
+                {D, A, A, A, A, A, A, D},
+                {A, A, A, A, A, A, A, A},
+                {A, A, A, A, A, A, A, A},
+                {D, A, A, A, A, A, A, D},
+                {D, D, A, A, A, A, D, D},
+                {D, D, D, A, A, D, D, D}
         };
 
     for ( int y = 0; y < IMHT; y++ ) {
@@ -80,7 +80,7 @@ int main(void) {
     chan c;
 
     par {
-        DataOutStream("out.pgm", c);       //thread to write out a PGM image
+        DataOutStream("1192x1192.pgm", c);       //thread to write out a PGM image
         work(c);
     }
 

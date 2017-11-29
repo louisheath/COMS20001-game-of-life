@@ -9,8 +9,8 @@
 #include "i2c.h"
 #include <assert.h>
 
-#define  IMHT 64                  //image height
-#define  IMWD 64                  //image width
+#define  IMHT 512                  //image height
+#define  IMWD 512                  //image width
 #define  NWKS 8                   //number of workers
 #define  NPKT IMWD/8              //number of packets in a row
 
@@ -293,7 +293,7 @@ void distributor(chanend c_in, chanend c_out, chanend tilt, chanend worker[NWKS]
 
             // Receive processed cells from workers
             for(int w = 0; w < NWKS; w++) {                   // for each of the workers
-                for(int y = 0; y < ((IMHT / NWKS)); y++ ) {   // for each row that will be used in new array (edge rows not returned)
+                for(int y = 0; y < ((IMHT / NWKS)); y++ ) {   // for each row that will be used in new array (ghost rows not returned)
                     int row = y + (w*(IMHT / NWKS));
                     for( int p = 0; p < NPKT; p++ ) {         // for every packet
                        // receive cell values from worker and place into new world array
@@ -325,7 +325,9 @@ int getNeighbours(int x, int y, uchar rowVal[NPKT][IMHT / NWKS + 2]) {
     // variables used in finding neighbours
     int xRight = mod(IMWD, x+1);
     int xLeft = mod(IMWD, x-1);
-        // we don't mod the y, because we never call edge cases in worker
+    // we don't mod the y, because we never call edge cases in worker
+    // counter for number of alive neighbours
+    int alive = 0;
 
     // coordinates for neighbours
     int nCoords[8][2] = {
@@ -334,9 +336,6 @@ int getNeighbours(int x, int y, uchar rowVal[NPKT][IMHT / NWKS + 2]) {
             {xLeft, y + 1}, {x, y + 1}, {xRight, y + 1}
     };
 
-    // store states of neighbours in array
-    int neighbours[8];
-
     // e.g. 26th bit is going to be the 3rd bit of the 4th packet
     //      in this case b = 3, p = 4
     int b, p;
@@ -344,15 +343,80 @@ int getNeighbours(int x, int y, uchar rowVal[NPKT][IMHT / NWKS + 2]) {
         b = mod(8, nCoords[n][0]);      // get index in block of 8 bits
         p = nCoords[n][0] / 8;          // get in which block of 8 bits we're processing
 
-        neighbours[n] = unpack(b, rowVal[p][nCoords[n][1]]); //unpack neighbour value from byte
+        if (unpack(b, rowVal[p][nCoords[n][1]]) == 1) alive++;; //unpack neighbour value and find out if it's alive
     }
 
-    // count number of alive neighbours
-    int alive = 0;
-    for (int i = 0; i < 8; i++) {
-        if (neighbours[i] == 1) alive++;
-    }
     return alive;
+}
+
+//// function to complete state of cells using game of life logic
+//uchar cellState(int rowNum, int pacNum, uchar rowVal[NPKT][(IMHT / NWKS) + 2]){
+//    // packet for new cell values, start with all alive
+//    uchar newP = 0xFF;
+//
+//    for ( int x = 0; x < 8; x++) {             // for every bit in the current packet
+//        // get number of alive neighbours
+//        int alive = getNeighbours(x + pacNum*8, rowNum, rowVal);
+//
+//        // If currently alive
+//        if (unpack(x, rowVal[pacNum][rowNum]) == 1) {
+//            // If number of alive neighbours isn't two or three, die. Else stay alive by default
+//            if (alive != 2 && alive != 3){
+//                newP = pack(x, newP, 0x0);
+//            }
+//        }
+//        // Else cell is currently dead: if not exactly three alive neighbours stay dead
+//        else if (alive != 3){
+//            newP = pack(x, newP, 0x0);
+//        }
+//    }
+//    // Return byte with processed bits
+//    return newP;
+//}
+
+// function to send ghost rows between worker
+void rowSender(int id, chanend wLeft, chanend wRight, uchar rowVal[NPKT][IMHT / NWKS + 2]){
+    // number of rows worker is processing (excluding ghost rows)
+    int load = IMHT / NWKS;
+
+    /*
+    Update ghost row states for next iteration by communicating with other workers
+    as well as send ghost row states for other workers to use
+    e.g: four workers:
+       w0 <--- w1      w2 <--- w3
+       w0      w1 ---> w2      w3 --->
+       w0 ---> w1      w2 ---> w3
+       w0      w1 <--- w2      w3 <---
+    */
+
+    if (id % 2 == 1) { // odd numbered workers
+        // 1. send to left
+        for ( int p = 0; p < NPKT; p++ )
+            wLeft <: rowVal[p][1];
+        // 2. send to right
+        for ( int p = 0; p < NPKT; p++ )
+            wRight <: rowVal[p][load];
+        // 3. receive from left
+        for ( int p = 0; p < NPKT; p++ )
+            wLeft :> rowVal[p][0];
+        // 4. receive from right
+        for ( int p = 0; p < NPKT; p++ )
+            wRight :> rowVal[p][load + 1];
+    }
+    else {             // even numbered workers
+        // 1. receive from right
+        for ( int p = 0; p < NPKT; p++ )
+            wRight :> rowVal[p][load + 1];
+        // 2. receive from left
+        for ( int p = 0; p < NPKT; p++ )
+            wLeft :> rowVal[p][0];
+        // 3. send to right
+        for ( int p = 0; p < NPKT; p++ )
+            wRight <: rowVal[p][load];
+        // 4. send to left
+        for ( int p = 0; p < NPKT; p++ )
+            wLeft <: rowVal[p][1];
+    }
 }
 
 /////////////////////////////////////////////////////////////////////////////////////////
@@ -391,7 +455,7 @@ void worker(int id, chanend dstr, chanend wLeft, chanend wRight)
             numAlive = 0;
 
             // Look at neighbouring cells and work out the next state of each cell
-            for( int y = 1; y < load + 1; y++ ) {              // for every row excluding edge rows
+            for( int y = 1; y < load + 1; y++ ) {              // for every row excluding ghost rows
                 for( int p = 0; p < NPKT; p++ ) {              //   and the packets in them
                     // packet for new cell values, start with all alive
                     uchar newP = 0xFF;
@@ -416,6 +480,11 @@ void worker(int id, chanend dstr, chanend wLeft, chanend wRight)
                         }
                     }
                     currRow[p] = newP;
+
+                    // find out the amount of alive cells in process packet
+//                    for (int a = 0; a < 8; a++){
+//                        if (unpack (a, currRow[p]) == 1) numAlive++;
+//                    }
                 }
 
                 for( int p = 0; p < NPKT; p++ ) {
@@ -430,44 +499,8 @@ void worker(int id, chanend dstr, chanend wLeft, chanend wRight)
                 }
             }
 
-            /*
-            Update ghost row states for next iteration by communicating with other workers
-            as well as send ghost row states for other workers to use
-            e.g: four workers:
-               w0 <--- w1      w2 <--- w3
-               w0      w1 ---> w2      w3 --->
-               w0 ---> w1      w2 ---> w3
-               w0      w1 <--- w2      w3 <---
-            */
-
-            if (id % 2 == 1) { // odd numbered workers
-                // 1. send to left
-                for ( int p = 0; p < NPKT; p++ )
-                    wLeft <: rowVal[p][1];
-                // 2. send to right
-                for ( int p = 0; p < NPKT; p++ )
-                    wRight <: rowVal[p][load];
-                // 3. receive from left
-                for ( int p = 0; p < NPKT; p++ )
-                    wLeft :> rowVal[p][0];
-                // 4. receive from right
-                for ( int p = 0; p < NPKT; p++ )
-                    wRight :> rowVal[p][load + 1];
-            }
-            else {             // even numbered workers
-                // 1. receive from right
-                for ( int p = 0; p < NPKT; p++ )
-                    wRight :> rowVal[p][load + 1];
-                // 2. receive from left
-                for ( int p = 0; p < NPKT; p++ )
-                    wLeft :> rowVal[p][0];
-                // 3. send to right
-                for ( int p = 0; p < NPKT; p++ )
-                    wRight <: rowVal[p][load];
-                // 4. send to left
-                for ( int p = 0; p < NPKT; p++ )
-                    wLeft <: rowVal[p][1];
-            }
+            // update adjacent workers' ghost rows as well as own
+            rowSender(id, wLeft, wRight, rowVal);
         }
         // case where board is tilted and status print is required
         else if (s == 1) {
@@ -477,7 +510,7 @@ void worker(int id, chanend dstr, chanend wLeft, chanend wRight)
         // case where SW2 is pressed and game info needs to be output
         else if (s == 2) {
             // Send new cell states to farmer for combining
-            for( int y = 1; y < load + 1; y++ ) {               // for every row excluding edge rows
+            for( int y = 1; y < load + 1; y++ ) {               // for every row excluding ghost rows
                 for( int p = 0; p < NPKT; p++ ) {           // for each packet
                     dstr <: rowVal[p][y];             // send to farmer (distributor)
                 }
@@ -618,7 +651,7 @@ void tests() {
     assert(unpack(7, testVal) == 1);
     //
     // Testing getNeighbours with every packet containing 11100110
-    //   note: getNeighbours is designed not to take edge rows
+    //   note: getNeighbours is designed not to take ghost rows
     uchar testState[NPKT][IMHT / NWKS + 2];
     for (int y = 0; y < IMHT / NWKS + 2; y++) {
         for (int p = 0; p < NPKT; p++) {
@@ -651,8 +684,8 @@ int main(void) {
     par {
         on tile[0] : i2c_master(i2c, 1, p_scl, p_sda, 10);                                  //server thread providing orientation data
         on tile[0] : orientation(i2c[0], tilt);                             //client thread reading orientation data
-        on tile[0] : DataInStream("64x64.pgm", inIO);                                     //thread to read in a PGM image
-        on tile[0] : DataOutStream("64x64out.pgm", outIO);                                //thread to write out a PGM image
+        on tile[0] : DataInStream("512x512.pgm", inIO);                                     //thread to read in a PGM image
+        on tile[0] : DataOutStream("512x512out.pgm", outIO);                                //thread to write out a PGM image
         on tile[0] : distributor(inIO, outIO, tilt, WtoD, time, buttons, leds); // farmer
         on tile[0] : checkTime(time);
         // initialise workers

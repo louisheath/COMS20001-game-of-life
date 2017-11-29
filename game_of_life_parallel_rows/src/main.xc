@@ -9,12 +9,12 @@
 #include "i2c.h"
 #include <assert.h>
 
-#define  IMHT 1184                  //image height
-#define  IMWD 1184                  //image width
+#define  IMHT 64                  //image height
+#define  IMWD 64                  //image width
 #define  NWKS 8                   //number of workers
 #define  NPKT IMWD/8              //number of packets in a row
 
-#define  printAt 2
+#define  printAt 100
 
 typedef unsigned char uchar;      //using uchar as shorthand
 
@@ -140,13 +140,55 @@ void DataInStream(char infname[], chanend c_out)
             c_out <: packet;
             packet = 0x00;
         }
-        //printf("\n");
+        if ((y % 100) == 0) printf( "DataInStream: Line %d read...\n", y);
     }
 
     //Close PGM image file
     _closeinpgm();
     printf( "DataInStream: Complete\n");
     return;
+}
+
+// Helper functions for distributor:
+//
+void statusReport(int i, uint32_t timeTaken, chanend worker[NWKS], chanend tilt) {
+    // receive number of alive cells from each worker
+    int temp;
+    int numAlive;
+
+    for (int w = 0; w < NWKS; w++) {
+        worker[w] :> temp;
+        numAlive += temp;
+    }
+
+    printf("Status Report:\n"
+           " Number of rounds processed: %d\n"
+           " Current number of live cells: %d\n"
+           " Processing time elapsed: %dms\n", i, numAlive, timeTaken);
+
+    // wait until we're untilted
+    tilt :> int x;
+}
+
+void startOutput(chanend c_out, chanend worker[NWKS]) {
+    // tell DataOutStream to open an output file
+    //   this is necessary to prevent the previous file being corrupted
+    c_out <: 1;
+
+    uchar x;
+
+    // Receive processed cells from workers
+    for(int w = 0; w < NWKS; w++) {                   // for each of the workers
+        for(int y = 0; y < ((IMHT / NWKS)); y++ ) {   // for each row that will be used in new array (ghost rows not returned)
+            int row = y + (w*(IMHT / NWKS));
+            for( int p = 0; p < NPKT; p++ ) {         // for every packet
+               // receive cell values from worker and place into new world array
+               worker[w] :> x;
+               // send the packet to DataOut
+               c_out <: x;
+            }
+        }
+    }
 }
 
 /////////////////////////////////////////////////////////////////////////////////////////
@@ -174,7 +216,6 @@ void distributor(chanend c_in, chanend c_out, chanend tilt, chanend worker[NWKS]
     int tilted = 0;           // tilt state
     int output = 0;           // whether game should be output
     uint32_t timeTaken;       // time taken to process image
-    int numAlive = 0;         // number of alive cells at pause
     int i = 0;                // current iteration
 
     //Starting up and wait for tilting of the xCore-200 Explorer
@@ -236,7 +277,7 @@ void distributor(chanend c_in, chanend c_out, chanend tilt, chanend worker[NWKS]
                         worker[w] <: 0; // zero indicates work
                     }
                     i++;
-                    if (i == 2 || i == 100) {
+                    if (i == printAt) {
                         output = 1;
                         break;
                     }
@@ -270,42 +311,11 @@ void distributor(chanend c_in, chanend c_out, chanend tilt, chanend worker[NWKS]
 
         // run logic for printing / outputting
         if (tilted) {
-            // receive number of alive cells from each worker
-            int temp;
-            for (int w = 0; w < NWKS; w++) {
-                worker[w] :> temp;
-                numAlive += temp;
-            }
-
-            printf("Status Report:\n"
-                   " Number of rounds processed: %d\n"
-                   " Current number of live cells: %d\n"
-                   " Processing time elapsed: %dms\n", i, numAlive, timeTaken);
-
-            // wait until we're untilted
-            tilt :> int x;
+            statusReport(i, timeTaken, worker, tilt);
             tilted = 0;
-
-            numAlive = 0;
         }
         else {
-            // tell DataOutStream to open an output file
-            //   this is necessary to prevent the previous file being corrupted
-            c_out <: (uchar) 1;
-
-            // Receive processed cells from workers
-            for(int w = 0; w < NWKS; w++) {                   // for each of the workers
-                for(int y = 0; y < ((IMHT / NWKS)); y++ ) {   // for each row that will be used in new array (ghost rows not returned)
-                    int row = y + (w*(IMHT / NWKS));
-                    for( int p = 0; p < NPKT; p++ ) {         // for every packet
-                       // receive cell values from worker and place into new world array
-                       worker[w] :> val[p][row];
-                       // send the packet to DataOut
-                       c_out <: val[p][row];
-                    }
-                }
-            }
-
+            startOutput(c_out, worker);
             output = 0;
         }
 
@@ -499,7 +509,7 @@ void DataOutStream(char outfname[], chanend c_in)
     printf( "DataOutStream: Start...\n" );
 
     while(1) {
-        c_in :> uchar x; // if distributer has a game state for outputting
+        c_in :> int x; // if distributer has a game state for outputting
 
         res = _openoutpgm( outfname, IMWD, IMHT );
         if( res ) {
@@ -522,7 +532,7 @@ void DataOutStream(char outfname[], chanend c_in)
         }
         //printf( "\n" );
         _writeoutline( line, IMWD );
-        printf( "DataOutStream: Line %d written...\n", y);
+        if ((y % 100) == 0) printf( "DataOutStream: Line %d written...\n", y);
         }
 
         //Close the PGM image
@@ -648,8 +658,8 @@ int main(void) {
     par {
         on tile[0] : i2c_master(i2c, 1, p_scl, p_sda, 10);                                  //server thread providing orientation data
         on tile[0] : orientation(i2c[0], tilt);                             //client thread reading orientation data
-        on tile[0] : DataInStream("1184x1184.pgm", inIO);                                     //thread to read in a PGM image
-        on tile[0] : DataOutStream("1184x1184out.pgm", outIO);                                //thread to write out a PGM image
+        on tile[0] : DataInStream("64x64.pgm", inIO);                                     //thread to read in a PGM image
+        on tile[0] : DataOutStream("64x64out.pgm", outIO);                                //thread to write out a PGM image
         on tile[0] : distributor(inIO, outIO, tilt, WtoD, time, buttons, leds); // farmer
         on tile[0] : checkTime(time);
         // initialise workers

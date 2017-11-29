@@ -79,6 +79,14 @@
   <inFunction>DataInStream</inFunction>
 </task>
 <task>
+  <name>statusReport</name>
+  <inFunction>statusReport</inFunction>
+</task>
+<task>
+  <name>startOutput</name>
+  <inFunction>startOutput</inFunction>
+</task>
+<task>
   <name>distributor</name>
   <inFunction>distributor</inFunction>
 </task>

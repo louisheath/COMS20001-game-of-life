@@ -9,8 +9,8 @@
 #include "i2c.h"
 #include <assert.h>
 
-#define  IMHT 512                  //image height
-#define  IMWD 512                  //image width
+#define  IMHT 64                  //image height
+#define  IMWD 64                  //image width
 #define  NWKS 8                   //number of workers
 #define  NPKT IMWD/8              //number of packets in a row
 
@@ -322,28 +322,23 @@ void distributor(chanend c_in, chanend c_out, chanend tilt, chanend worker[NWKS]
 //
 /////////////////////////////////////////////////////////////////////////////////////////
 int getNeighbours(int x, int y, uchar rowVal[NPKT][IMHT / NWKS + 2]) {
-    // variables used in finding neighbours
-    int xRight = mod(IMWD, x+1);
-    int xLeft = mod(IMWD, x-1);
-    // we don't mod the y, because we never call edge cases in worker
     // counter for number of alive neighbours
     int alive = 0;
+    int b, p; // an x coordinate is the bth bit in the pth packet
 
-    // coordinates for neighbours
-    int nCoords[8][2] = {
-            {xLeft, y - 1}, {x, y - 1}, {xRight, y - 1},
-            {xLeft, y},                 {xRight, y},
-            {xLeft, y + 1}, {x, y + 1}, {xRight, y + 1}
-    };
+    for (int i = -1; i < 2; i++) {
+        int xN = mod(IMWD, x + i);  // x coordinate of each neighbour cell
 
-    // e.g. 26th bit is going to be the 3rd bit of the 4th packet
-    //      in this case b = 3, p = 4
-    int b, p;
-    for (int n = 0; n < 8; n++) {   // for each neighbour
-        b = mod(8, nCoords[n][0]);      // get index in block of 8 bits
-        p = nCoords[n][0] / 8;          // get in which block of 8 bits we're processing
+        for (int j = -1; j < 2; j++) {
+            int yN = y + j;
 
-        if (unpack(b, rowVal[p][nCoords[n][1]]) == 1) alive++;; //unpack neighbour value and find out if it's alive
+            if (j != 0 || i != 0) { // when j == i == 0, x == xN and y == yN. avoid.
+                b = mod(8, xN);      // get index in block of 8 bits
+                p = xN / 8;          // get in which block of 8 bits we're processing
+
+                if (unpack(b, rowVal[p][yN]) == 1) alive++;; //unpack neighbour value and find out if it's alive
+            }
+        }
     }
 
     return alive;
@@ -684,8 +679,8 @@ int main(void) {
     par {
         on tile[0] : i2c_master(i2c, 1, p_scl, p_sda, 10);                                  //server thread providing orientation data
         on tile[0] : orientation(i2c[0], tilt);                             //client thread reading orientation data
-        on tile[0] : DataInStream("512x512.pgm", inIO);                                     //thread to read in a PGM image
-        on tile[0] : DataOutStream("512x512out.pgm", outIO);                                //thread to write out a PGM image
+        on tile[0] : DataInStream("64x64.pgm", inIO);                                     //thread to read in a PGM image
+        on tile[0] : DataOutStream("64x64out.pgm", outIO);                                //thread to write out a PGM image
         on tile[0] : distributor(inIO, outIO, tilt, WtoD, time, buttons, leds); // farmer
         on tile[0] : checkTime(time);
         // initialise workers

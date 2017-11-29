@@ -336,18 +336,6 @@ void distributor(chanend c_in, chanend c_out, chanend tilt, chanend time, in por
         // prepare for next iteration
         LEDs <: 0;
         b :> button;
-        // Send processed data to DataOutStream
-        for(int y = 0; y < IMHT; y++ ) {
-            for( int p = 0; p < NPKT; p++ ) { // for every packet
-                c_out <: newVal[p][y];           // send cell information to DataOutStream
-            }
-        }
-        LEDs <: 0; // turn off blue LED
-
-        printf("Outputted\n");
-
-        reqTime <: (uchar) 0; // unpause the timer after output
-        b :> button;          // get new button status
     }
 }
 
@@ -388,7 +376,7 @@ void DataOutStream(char outfname[], chanend c_in)
                 }
                 //printf( "\n" );
                 _writeoutline( line, IMWD );
-                //printf( "DataOutStream: Line written...\n" );
+                printf( "DataOutStream: Line %d written...\n", y);
                 }
 
                 //Close the PGM image
@@ -412,7 +400,7 @@ void DataOutStream(char outfname[], chanend c_in)
 // the current number of live cells and the processing time elapsed after finishing image read-in
 //
 /////////////////////////////////////////////////////////////////////////////////////////
-void orientation( client interface i2c_master_if i2c, chanend dist, chanend toTimer) {
+void orientation( client interface i2c_master_if i2c, chanend dstr) {
     i2c_regop_res_t result;
     char status_data = 0;
     int tilted = 0;
@@ -430,30 +418,75 @@ void orientation( client interface i2c_master_if i2c, chanend dist, chanend toTi
     }
 
     // wait for start signal from distributor
-    dist :> uchar x;
+    dstr :> int x;
 
     //Probe the orientation x-axis forever
     while (1) {
 
-        //check until new orientation data is available
-        do {
-            status_data = i2c.read_reg(FXOS8700EQ_I2C_ADDR, FXOS8700EQ_DR_STATUS, result);
-        } while (!status_data & 0x08);
+      //check until new orientation data is available
+      do {
+          status_data = i2c.read_reg(FXOS8700EQ_I2C_ADDR, FXOS8700EQ_DR_STATUS, result);
+      } while (!status_data & 0x08);
 
-        //get new x-axis tilt value
-        int x = read_acceleration(i2c, FXOS8700EQ_OUT_X_MSB);
-        //pause / unpause distributer and timer when tilted / untilted
-        if (!tilted) {
-            if (x>30) {
-                tilted = 1;
-                toTimer <: (uchar) 1;
-            }
-        }
-        else if (x<10) {
-            tilted = 0;
-            toTimer <: (uchar) 0;
+      //get new x-axis tilt value
+      int x = read_acceleration(i2c, FXOS8700EQ_OUT_X_MSB);
+      //pause / unpause distributer and timer when tilted / untilted
+      if (!tilted) {
+          if (x>30) {
+              tilted = 1;
+              dstr <: 1;
+          }
+      }
+      else if (x<10) {
+          tilted = 0;
+          dstr <: 0;
+      }
+    }
+}
+
+// Unit tests
+void tests() {
+    assert(NPKT == IMWD/8);
+    assert(mod(2,5) == 1);
+    assert(mod(8, 17) == 1);
+    assert(mod(8, -1) == 7);
+    assert(mod(8, 0) == 0);
+    assert(5 / 2 == 2);                 // checking that division rounds down
+    //
+    // Testing packing
+    //
+    assert(pack(3, 0x00, 0xFF) == 0x08);
+    assert(pack(7, 0x00, 0xFF) == 0x80);
+    assert(pack(0, 0x00, 0xFF) == 0x01);
+    assert(pack(0, 0xFF, 0x00) == 0xFE);
+    assert(pack(0, 0x00, 0x00) == 0x00);
+    assert(pack(7, 0xFF, 0x00) == 0x7F);
+    assert(pack(0, 0x01, 0x00) == 0x00);
+    //
+    // Testing unpacking with 11100110
+    //
+    uchar testVal = 0xE6;
+    assert(unpack(0, testVal) == 0);
+    assert(unpack(1, testVal) == 1);
+    assert(unpack(2, testVal) == 1);
+    assert(unpack(3, testVal) == 0);
+    assert(unpack(4, testVal) == 0);
+    assert(unpack(5, testVal) == 1);
+    assert(unpack(6, testVal) == 1);
+    assert(unpack(7, testVal) == 1);
+    //
+    // Testing getNeighbours with every packet containing 11100110
+    //   note: getNeighbours is designed not to take ghost rows
+    uchar testState[NPKT][IMHT / NWKS + 2];
+    for (int y = 0; y < IMHT / NWKS + 2; y++) {
+        for (int p = 0; p < NPKT; p++) {
+            testState[p][y] = testVal;
         }
     }
+    assert(getNeighbours(3, 1, testState) == 3);
+    assert(getNeighbours(11, 1, testState) == 3);
+
+    printf("Tests successful\n");
 }
 
 /////////////////////////////////////////////////////////////////////////////////////////
@@ -462,24 +495,22 @@ void orientation( client interface i2c_master_if i2c, chanend dist, chanend toTi
 //
 /////////////////////////////////////////////////////////////////////////////////////////
 int main(void) {
+    // Interfaces
+    i2c_master_if i2c[1];                          // interface to orientation sensor
 
-    i2c_master_if i2c[1];              //interface to orientation
-
-    char infname[] = "512x512.pgm";     //put your input image path here
-    char outfname[] = "512x512out.pgm"; //put your output image path here
-    chan c_inIO,        // DataStreamIn
-         c_outIO,       // DataStreamOut
-         c_control,     // communication between orientation and distributor
-         reqTime,       // Request time
-         pauseTime;     // Orientation to Timer pause signal
+    // Channel definitions
+    chan inIO,       // DataStreamIn
+         outIO,      // DataStreamOut
+         tilt,       // communication between orientation and distributor
+         time;       // request time
 
     par {
-        i2c_master(i2c, 1, p_scl, p_sda, 10);                               //server thread providing orientation data
-        orientation(i2c[0], c_control, pauseTime);                          //client thread reading orientation data
-        DataInStream(infname, c_inIO);                                      //thread to read in a PGM image
-        DataOutStream(outfname, c_outIO);                                   //thread to write out a PGM image
-        distributor(c_inIO, c_outIO, c_control, buttons, leds, reqTime);    //thread to coordinate work on image
-        checkTime(reqTime, pauseTime);
+        on tile[0] : i2c_master(i2c, 1, p_scl, p_sda, 10);                                  //server thread providing orientation data
+        on tile[0] : orientation(i2c[0], tilt);                             //client thread reading orientation data
+        on tile[0] : DataInStream("1184x1184.pgm", inIO);                                     //thread to read in a PGM image
+        on tile[0] : DataOutStream("1184x1184out.pgm", outIO);                                //thread to write out a PGM image
+        on tile[0] : distributor(inIO, outIO, tilt, time, buttons, leds); // farmer
+        on tile[0] : checkTime(time);
     }
 
     return 0;

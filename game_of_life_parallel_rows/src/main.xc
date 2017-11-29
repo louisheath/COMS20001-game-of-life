@@ -9,8 +9,8 @@
 #include "i2c.h"
 #include <assert.h>
 
-#define  IMHT 1024                  //image height
-#define  IMWD 1024                  //image width
+#define  IMHT 1184                  //image height
+#define  IMWD 1184                  //image width
 #define  NWKS 8                   //number of workers
 #define  NPKT IMWD/8              //number of packets in a row
 
@@ -338,7 +338,7 @@ int getNeighbours(int x, int y, uchar rowVal[NPKT][IMHT / NWKS + 2]) {
                 b = mod(8, xN);      // get index in block of 8 bits
                 p = xN / 8;          // get in which block of 8 bits we're processing
 
-                if (unpack(b, rowVal[p][yN]) == 1) alive++;; //unpack neighbour value and find out if it's alive
+                if (unpack(b, rowVal[p][yN]) == 1) alive++; //unpack neighbour value and find out if it's alive
             }
         }
     }
@@ -522,7 +522,7 @@ void DataOutStream(char outfname[], chanend c_in)
         }
         //printf( "\n" );
         _writeoutline( line, IMWD );
-        //printf( "DataOutStream: Line written...\n" );
+        printf( "DataOutStream: Line %d written...\n", y);
         }
 
         //Close the PGM image
@@ -648,8 +648,8 @@ int main(void) {
     par {
         on tile[0] : i2c_master(i2c, 1, p_scl, p_sda, 10);                                  //server thread providing orientation data
         on tile[0] : orientation(i2c[0], tilt);                             //client thread reading orientation data
-        on tile[0] : DataInStream("1024x1024.pgm", inIO);                                     //thread to read in a PGM image
-        on tile[0] : DataOutStream("1024x1024out.pgm", outIO);                                //thread to write out a PGM image
+        on tile[0] : DataInStream("1184x1184.pgm", inIO);                                     //thread to read in a PGM image
+        on tile[0] : DataOutStream("1184x1184out.pgm", outIO);                                //thread to write out a PGM image
         on tile[0] : distributor(inIO, outIO, tilt, WtoD, time, buttons, leds); // farmer
         on tile[0] : checkTime(time);
         // initialise workers

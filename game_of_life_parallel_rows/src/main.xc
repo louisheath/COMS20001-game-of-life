@@ -42,7 +42,7 @@ void tests();
 // modulo function that works with negatives, returns x mod n
 int mod(int n,int x) {
     while (x < 0) x += n;
-    return (x % n);
+    return x % n;
 }
 
 // pack c into packet 'byte' at index 'index'
@@ -73,7 +73,7 @@ void checkTime(chanend dstr) {
     int paused = 0;
 
     // receive signal to start timing
-    dstr :> uchar x;
+    dstr :> int x;
     t :> prev;
 
     while (1) {
@@ -81,7 +81,7 @@ void checkTime(chanend dstr) {
             [[ordered]]
             select {
                 // if distributor says pause
-                case dstr :> uchar pause:
+                case dstr :> int pause:
                     dstr <: timeTaken;
                     paused = 1;     // pause while distributer outputs
                     break;
@@ -101,7 +101,7 @@ void checkTime(chanend dstr) {
         }
 
         // wait until distributer says to resume
-        dstr :> uchar resume;
+        dstr :> int resume;
         paused = 0;
         t :> prev;
     }
@@ -207,9 +207,9 @@ void distributor(chanend c_in, chanend c_out, chanend tilt, chanend worker[NWKS]
     }
 
     // Start detecting tilts
-    tilt <: (uchar) 1;
+    tilt <: 1;
     // Start timing
-    time <: (uchar) 0;
+    time <: 1;
 
     // game runs infinitely
     while (1) {
@@ -231,7 +231,7 @@ void distributor(chanend c_in, chanend c_out, chanend tilt, chanend worker[NWKS]
 
                     // start next iteration
                     for(int w = 0; w < NWKS; w++) {
-                        worker[w] <: (uchar) 0; // zero indicates work
+                        worker[w] <: 0; // zero indicates work
                     }
                     i++;
                     if (i == 100) {
@@ -250,7 +250,7 @@ void distributor(chanend c_in, chanend c_out, chanend tilt, chanend worker[NWKS]
         /* game paused, either produce output or print update */
 
         // send signal to worker for pausing, indicating the form of output
-        uchar signal;
+        int signal;
         if (tilted) signal = 1;     // 1 returns numAlive
         else        signal = 2;     // 2 returns game state
         for (int w = 0; w < NWKS; w++) {
@@ -258,7 +258,7 @@ void distributor(chanend c_in, chanend c_out, chanend tilt, chanend worker[NWKS]
         }
 
         // tell timer to pause
-        time <: (uchar) 1;
+        time <: 1;
         time :> timeTaken;
         printf("Paused at %dms\n", timeTaken);
 
@@ -308,7 +308,7 @@ void distributor(chanend c_in, chanend c_out, chanend tilt, chanend worker[NWKS]
         }
 
         // resume timer
-        time <: (uchar) 1;
+        time <: 1;
 
         // prepare for next iteration
         LEDs <: 0;
@@ -343,31 +343,6 @@ int getNeighbours(int x, int y, uchar rowVal[NPKT][IMHT / NWKS + 2]) {
 
     return alive;
 }
-
-//// function to complete state of cells using game of life logic
-//uchar cellState(int rowNum, int pacNum, uchar rowVal[NPKT][(IMHT / NWKS) + 2]){
-//    // packet for new cell values, start with all alive
-//    uchar newP = 0xFF;
-//
-//    for ( int x = 0; x < 8; x++) {             // for every bit in the current packet
-//        // get number of alive neighbours
-//        int alive = getNeighbours(x + pacNum*8, rowNum, rowVal);
-//
-//        // If currently alive
-//        if (unpack(x, rowVal[pacNum][rowNum]) == 1) {
-//            // If number of alive neighbours isn't two or three, die. Else stay alive by default
-//            if (alive != 2 && alive != 3){
-//                newP = pack(x, newP, 0x0);
-//            }
-//        }
-//        // Else cell is currently dead: if not exactly three alive neighbours stay dead
-//        else if (alive != 3){
-//            newP = pack(x, newP, 0x0);
-//        }
-//    }
-//    // Return byte with processed bits
-//    return newP;
-//}
 
 // function to send ghost rows between worker
 void rowSender(int id, chanend wLeft, chanend wRight, uchar rowVal[NPKT][IMHT / NWKS + 2]){
@@ -439,7 +414,7 @@ void worker(int id, chanend dstr, chanend wLeft, chanend wRight)
         }
     }
 
-    uchar s;
+    int s;
     // game runs infinitely
     while (1) {
         // receive signal from dist
@@ -563,7 +538,6 @@ void DataOutStream(char outfname[], chanend c_in)
     return;
 }
 
-
 /////////////////////////////////////////////////////////////////////////////////////////
 //
 // Initialise and  read orientation, send first tilt event to channel
@@ -587,7 +561,7 @@ void orientation( client interface i2c_master_if i2c, chanend dstr) {
     }
 
     // wait for start signal from distributor
-    dstr :> uchar x;
+    dstr :> int x;
 
     //Probe the orientation x-axis forever
     while (1) {
@@ -612,7 +586,6 @@ void orientation( client interface i2c_master_if i2c, chanend dstr) {
       }
     }
 }
-
 
 // Unit tests
 void tests() {

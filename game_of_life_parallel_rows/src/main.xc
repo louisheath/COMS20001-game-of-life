@@ -1,6 +1,6 @@
 // COMS20001 - Game of Life: Jack Jones and Louis Heath
 // (using the XMOS i2c accelerometer)
-// Version 2 : Four workers
+// Final version: Eight workers
 
 #include <platform.h>
 #include <xs1.h>
@@ -9,10 +9,12 @@
 #include "i2c.h"
 #include <assert.h>
 
-#define  IMHT 64                  //image height
-#define  IMWD 64                  //image width
+#define  IMHT 512                  //image height
+#define  IMWD 512                  //image width
 #define  NWKS 8                   //number of workers
 #define  NPKT IMWD/8              //number of packets in a row
+
+#define  printAt 100
 
 typedef unsigned char uchar;      //using uchar as shorthand
 
@@ -234,7 +236,7 @@ void distributor(chanend c_in, chanend c_out, chanend tilt, chanend worker[NWKS]
                         worker[w] <: 0; // zero indicates work
                     }
                     i++;
-                    if (i == 100) {
+                    if (i == printAt) {
                         output = 1;
                         break;
                     }
@@ -408,7 +410,7 @@ void worker(int id, chanend dstr, chanend wLeft, chanend wRight)
 
     // contruct array to work on
     for( int y = 0; y < (load + 2); y++ ) {     // for every row to be input
-        for( int x = 0; x < NPKT; x++ ) {         // for every column
+        for( int x = 0; x < NPKT; x++ ) {       // for every column
             // read in rows cell by cell from distributer to be worked on
             dstr :> rowVal[x][y];
         }
@@ -450,19 +452,13 @@ void worker(int id, chanend dstr, chanend wLeft, chanend wRight)
                         }
                     }
                     currRow[p] = newP;
-
-                    // find out the amount of alive cells in process packet
-//                    for (int a = 0; a < 8; a++){
-//                        if (unpack (a, currRow[p]) == 1) numAlive++;
-//                    }
                 }
 
                 for( int p = 0; p < NPKT; p++ ) {
-                    // if we're at the last row, update it as the y loop is going to stop
-
                     // if we're on at least the second row we no longer depend on prevRow and can output
                     if (y > 1) {
                         rowVal[p][y - 1] = prevRow[p];                      // update non-overlapping rows
+                        // if we're at the last row, update it as the y loop is going to stop
                         if (y == load) rowVal[p][y] = currRow[p];
                     }
                     prevRow[p] = currRow[p];                                // move current processed row to previous row storage for writing next iteration
@@ -652,8 +648,8 @@ int main(void) {
     par {
         on tile[0] : i2c_master(i2c, 1, p_scl, p_sda, 10);                                  //server thread providing orientation data
         on tile[0] : orientation(i2c[0], tilt);                             //client thread reading orientation data
-        on tile[0] : DataInStream("64x64.pgm", inIO);                                     //thread to read in a PGM image
-        on tile[0] : DataOutStream("64x64out.pgm", outIO);                                //thread to write out a PGM image
+        on tile[0] : DataInStream("512x512.pgm", inIO);                                     //thread to read in a PGM image
+        on tile[0] : DataOutStream("512x512out.pgm", outIO);                                //thread to write out a PGM image
         on tile[0] : distributor(inIO, outIO, tilt, WtoD, time, buttons, leds); // farmer
         on tile[0] : checkTime(time);
         // initialise workers

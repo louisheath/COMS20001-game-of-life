@@ -7,11 +7,9 @@
 #include "i2c.h"
 #include <assert.h>
 
-#define  IMHT 16                  //image height
-#define  IMWD 16                  //image width
+#define  IMHT 512                  //image height
+#define  IMWD 512                  //image width
 #define  NPKT IMWD/8              //number of packets in a row
-
-#define  printAt 2
 
 typedef unsigned char uchar;      //using uchar as shorthand
 
@@ -189,6 +187,7 @@ void distributor(chanend c_in, chanend c_out, chanend tilt, chanend time, in por
     // arrays for storing processed rows
     uchar prevRow[NPKT];
     uchar currRow[NPKT];
+    uchar frstRow[NPKT];
 
     // variables for hardware control
     int button = 0;           // button input from board/button listener
@@ -206,10 +205,10 @@ void distributor(chanend c_in, chanend c_out, chanend tilt, chanend time, in por
     printf( "Waiting for start button...\n" );
 
 
-//    // wait for SW1 button input
-//    while (button != 14) {
-//        b :> button;
-//    }
+    // wait for SW1 button input
+    while (button != 14) {
+        b :> button;
+    }
 
     LEDs <: 4; // send green LED to be lit
 
@@ -277,18 +276,23 @@ void distributor(chanend c_in, chanend c_out, chanend tilt, chanend time, in por
 
                         for( int p = 0; p < NPKT; p++ ) {
                             // if we're on at least the second row we no longer depend on prevRow and can output
-                            if (y > 0) {
+                            if (y > 1) {
                                 val[p][y - 1] = prevRow[p];                      // update non-overlapping rows
                                 // if we're at the last row, update it as the y loop is going to stop
-                                if (y == IMHT - 1) val[p][y] = currRow[p];
+                                if (y == IMHT - 1) {
+                                    val[p][y] = currRow[p];
+                                    val[p][0] = frstRow[p];
+                                }
+                            }
+                            else if (y == 0) {
+                                frstRow[p] = currRow[p];
                             }
                             prevRow[p] = currRow[p];                                // move current processed row to previous row storage for writing next iteration
                         }
                     }
 
                     i++;
-                    printf("completed iteration %d\n", i);
-                    if (i == 2) {
+                    if (i == 2 || i == 100) {
                         output = 1;
                         break;
                     }
@@ -513,8 +517,8 @@ int main(void) {
     par {
         on tile[0]: i2c_master(i2c, 1, p_scl, p_sda, 10);                                  //server thread providing orientation data
         on tile[0]: orientation(i2c[0], tilt);                             //client thread reading orientation data
-        on tile[0]: DataInStream("16x16.pgm", inIO);                                     //thread to read in a PGM image
-        on tile[0]: DataOutStream("16x16out.pgm", outIO);                                //thread to write out a PGM image
+        on tile[0]: DataInStream("512x512.pgm", inIO);                                     //thread to read in a PGM image
+        on tile[0]: DataOutStream("512x512out.pgm", outIO);                                //thread to write out a PGM image
         on tile[0]: distributor(inIO, outIO, tilt, time, buttons, leds); // farmer
         on tile[0]: checkTime(time);
     }

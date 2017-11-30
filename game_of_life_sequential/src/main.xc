@@ -1,15 +1,17 @@
- // COMS20001 - Cellular Automaton Farm - Initial Code Skeleton
-// (using the XMOS i2c accelerometer demo code)
+// Sequential
 
 #include <platform.h>
 #include <xs1.h>
 #include <stdio.h>
 #include "pgmIO.h"
 #include "i2c.h"
+#include <assert.h>
 
-#define  IMHT 512                  //image height
-#define  IMWD 512                  //image width
+#define  IMHT 64                  //image height
+#define  IMWD 64                  //image width
 #define  NPKT IMWD/8              //number of packets in a row
+
+#define  printAt 2
 
 typedef unsigned char uchar;      //using uchar as shorthand
 
@@ -34,6 +36,8 @@ out port leds = XS1_PORT_4F;   //port to access xCore-200 LEDs
 #define FXOS8700EQ_OUT_Z_MSB 0x5
 #define FXOS8700EQ_OUT_Z_LSB 0x6
 
+void tests();
+
 // modulo function that works with negatives
 int mod(int n,int x) {
     while (x < 0) x += n;
@@ -48,6 +52,7 @@ uchar pack(int index, uchar byte, uchar c) {    // pack c into packet 'byte' at 
         byte |= (1 << index);
     }
     return byte;
+}
 
 int unpack(int index, uchar byte) {             // unpack bit from index 'index' of packet 'byte'
     return (byte >> index) & 1;
@@ -152,7 +157,7 @@ int getNeighbours(int x, int y, uchar rowVal[NPKT][IMHT]) {
         int xN = mod(IMWD, x + i);  // x coordinate of each neighbour cell
 
         for (int j = -1; j < 2; j++) {
-            int yN = y + j;
+            int yN = mod(IMHT, y + j);
 
             if (j != 0 || i != 0) { // when j == i == 0, x == xN and y == yN. avoid.
                 b = mod(8, xN);      // get index in block of 8 bits
@@ -243,18 +248,18 @@ void distributor(chanend c_in, chanend c_out, chanend tilt, chanend time, in por
                     numAlive = 0;
 
                     // Look at neighbouring cells and work out the next state of each cell
-                    for( int y = 1; y < IMHT + 1; y++ ) {              // for every row excluding ghost rows
-                        for( int p = 0; p < NPKT; p++ ) {              //   and the packets in them
+                    for( int y = 0; y < IMHT; y++ ) {              // for every row
+                        for( int p = 0; p < NPKT; p++ ) {          //   and the packets in them
                             // packet for new cell values, start with all alive
                             uchar newP = 0xFF;
                             numAlive += 8;
 
                             for ( int x = 0; x < 8; x++) {             // for every bit in the current packet
                                 // get number of alive neighbours
-                                int alive = getNeighbours(x + p*8, y, rowVal);
+                                int alive = getNeighbours(x + p*8, y, val);
 
                                 // If currently alive
-                                if (unpack(x, rowVal[p][y]) == 1) {
+                                if (unpack(x, val[p][y]) == 1) {
                                     // If number of alive neighbours isn't two or three, die. Else stay alive by default
                                     if (alive != 2 && alive != 3){
                                         newP = pack(x, newP, 0x0);
@@ -273,9 +278,9 @@ void distributor(chanend c_in, chanend c_out, chanend tilt, chanend time, in por
                         for( int p = 0; p < NPKT; p++ ) {
                             // if we're on at least the second row we no longer depend on prevRow and can output
                             if (y > 1) {
-                                rowVal[p][y - 1] = prevRow[p];                      // update non-overlapping rows
+                                val[p][y - 1] = prevRow[p];                      // update non-overlapping rows
                                 // if we're at the last row, update it as the y loop is going to stop
-                                if (y == IMHT) rowVal[p][y] = currRow[p];
+                                if (y == IMHT) val[p][y] = currRow[p];
                             }
                             prevRow[p] = currRow[p];                                // move current processed row to previous row storage for writing next iteration
                         }
@@ -323,7 +328,7 @@ void distributor(chanend c_in, chanend c_out, chanend tilt, chanend time, in por
             // Send processed data to DataOutStream
             for(int y = 0; y < IMHT; y++ ) {
                 for( int p = 0; p < NPKT; p++ ) { // for every packet
-                    c_out <: newVal[p][y];           // send cell information to DataOutStream
+                    c_out <: val[p][y];           // send cell information to DataOutStream
                 }
             }
 
@@ -376,7 +381,7 @@ void DataOutStream(char outfname[], chanend c_in)
                 }
                 //printf( "\n" );
                 _writeoutline( line, IMWD );
-                printf( "DataOutStream: Line %d written...\n", y);
+                //printf( "DataOutStream: Line %d written...\n", y);
                 }
 
                 //Close the PGM image
@@ -477,8 +482,8 @@ void tests() {
     //
     // Testing getNeighbours with every packet containing 11100110
     //   note: getNeighbours is designed not to take ghost rows
-    uchar testState[NPKT][IMHT / NWKS + 2];
-    for (int y = 0; y < IMHT / NWKS + 2; y++) {
+    uchar testState[NPKT][IMHT];
+    for (int y = 0; y < IMHT; y++) {
         for (int p = 0; p < NPKT; p++) {
             testState[p][y] = testVal;
         }
@@ -505,12 +510,12 @@ int main(void) {
          time;       // request time
 
     par {
-        on tile[0] : i2c_master(i2c, 1, p_scl, p_sda, 10);                                  //server thread providing orientation data
-        on tile[0] : orientation(i2c[0], tilt);                             //client thread reading orientation data
-        on tile[0] : DataInStream("1184x1184.pgm", inIO);                                     //thread to read in a PGM image
-        on tile[0] : DataOutStream("1184x1184out.pgm", outIO);                                //thread to write out a PGM image
-        on tile[0] : distributor(inIO, outIO, tilt, time, buttons, leds); // farmer
-        on tile[0] : checkTime(time);
+        i2c_master(i2c, 1, p_scl, p_sda, 10);                                  //server thread providing orientation data
+        orientation(i2c[0], tilt);                             //client thread reading orientation data
+        DataInStream("64x64.pgm", inIO);                                     //thread to read in a PGM image
+        DataOutStream("64x64out.pgm", outIO);                                //thread to write out a PGM image
+        distributor(inIO, outIO, tilt, time, buttons, leds); // farmer
+        checkTime(time);
     }
 
     return 0;

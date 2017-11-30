@@ -7,19 +7,19 @@
 #include "i2c.h"
 #include <assert.h>
 
-#define  IMHT 64                  //image height
-#define  IMWD 64                  //image width
+#define  IMHT 16                  //image height
+#define  IMWD 16                  //image width
 #define  NPKT IMWD/8              //number of packets in a row
 
 #define  printAt 2
 
 typedef unsigned char uchar;      //using uchar as shorthand
 
-port p_scl = XS1_PORT_1E;         //interface ports to orientation
-port p_sda = XS1_PORT_1F;
+on tile[0]: port p_scl = XS1_PORT_1E;         //interface ports to orientation
+on tile[0]: port p_sda = XS1_PORT_1F;
 
-in port buttons = XS1_PORT_4E; //port to access xCore-200 buttons
-out port leds = XS1_PORT_4F;   //port to access xCore-200 LEDs
+on tile[0]: in port buttons = XS1_PORT_4E; //port to access xCore-200 buttons
+on tile[0]: out port leds = XS1_PORT_4F;   //port to access xCore-200 LEDs
     //1st bit...separate green LED
     //2nd bit...blue LED
     //3rd bit...green LED
@@ -39,7 +39,7 @@ out port leds = XS1_PORT_4F;   //port to access xCore-200 LEDs
 void tests();
 
 // modulo function that works with negatives
-int mod(int n,int x) {
+int mod(int n, int x) {
     while (x < 0) x += n;
     return x % n;
 }
@@ -206,10 +206,10 @@ void distributor(chanend c_in, chanend c_out, chanend tilt, chanend time, in por
     printf( "Waiting for start button...\n" );
 
 
-    // wait for SW1 button input
-    while (button != 14) {
-        b :> button;
-    }
+//    // wait for SW1 button input
+//    while (button != 14) {
+//        b :> button;
+//    }
 
     LEDs <: 4; // send green LED to be lit
 
@@ -277,17 +277,18 @@ void distributor(chanend c_in, chanend c_out, chanend tilt, chanend time, in por
 
                         for( int p = 0; p < NPKT; p++ ) {
                             // if we're on at least the second row we no longer depend on prevRow and can output
-                            if (y > 1) {
+                            if (y > 0) {
                                 val[p][y - 1] = prevRow[p];                      // update non-overlapping rows
                                 // if we're at the last row, update it as the y loop is going to stop
-                                if (y == IMHT) val[p][y] = currRow[p];
+                                if (y == IMHT - 1) val[p][y] = currRow[p];
                             }
                             prevRow[p] = currRow[p];                                // move current processed row to previous row storage for writing next iteration
                         }
                     }
 
                     i++;
-                    if (i == 2 || i == 100) {
+                    printf("completed iteration %d\n", i);
+                    if (i == 2) {
                         output = 1;
                         break;
                     }
@@ -510,12 +511,12 @@ int main(void) {
          time;       // request time
 
     par {
-        i2c_master(i2c, 1, p_scl, p_sda, 10);                                  //server thread providing orientation data
-        orientation(i2c[0], tilt);                             //client thread reading orientation data
-        DataInStream("64x64.pgm", inIO);                                     //thread to read in a PGM image
-        DataOutStream("64x64out.pgm", outIO);                                //thread to write out a PGM image
-        distributor(inIO, outIO, tilt, time, buttons, leds); // farmer
-        checkTime(time);
+        on tile[0]: i2c_master(i2c, 1, p_scl, p_sda, 10);                                  //server thread providing orientation data
+        on tile[0]: orientation(i2c[0], tilt);                             //client thread reading orientation data
+        on tile[0]: DataInStream("16x16.pgm", inIO);                                     //thread to read in a PGM image
+        on tile[0]: DataOutStream("16x16out.pgm", outIO);                                //thread to write out a PGM image
+        on tile[0]: distributor(inIO, outIO, tilt, time, buttons, leds); // farmer
+        on tile[0]: checkTime(time);
     }
 
     return 0;

@@ -7,8 +7,8 @@
 #include "i2c.h"
 #include <assert.h>
 
-#define  IMHT 512                  //image height
-#define  IMWD 512                  //image width
+#define  IMHT 64                  //image height
+#define  IMWD 64                  //image width
 #define  NPKT IMWD/8              //number of packets in a row
 
 typedef unsigned char uchar;      //using uchar as shorthand
@@ -128,12 +128,10 @@ void DataInStream(char infname[], chanend c_out)
       for ( int p = 0; p < NPKT; p++) {           // for every packet we can fit in the row
           for ( int x = 0; x < 8; x++) {          // for each of the eight bits to be packed
               packet = pack(x, packet, line[x + p*8]);
-              //printf( "-%4.1d ", line[p*8 + x] ); //show image values
           }
           c_out <: packet;
           packet = 0x00;
       }
-      //printf("\n")
     }
 
     //Close PGM image file
@@ -171,9 +169,10 @@ int getNeighbours(int x, int y, uchar rowVal[NPKT][IMHT]) {
 
 /////////////////////////////////////////////////////////////////////////////////////////
 //
-// Start your implementation by changing this function to implement the game of life
-// by farming out parts of the image to worker threads who implement it...
-// Currently the function just inverts the image
+//Distributor receives current world state from DataStreamIn,
+//             manages hardware,
+//             processes cells,
+//             and sends new world to DataStreamOut
 //
 /////////////////////////////////////////////////////////////////////////////////////////
 void distributor(chanend c_in, chanend c_out, chanend tilt, chanend time, in port b, out port LEDs)
@@ -211,8 +210,8 @@ void distributor(chanend c_in, chanend c_out, chanend tilt, chanend time, in por
     }
 
     LEDs <: 4; // send green LED to be lit
-
-    printf( "Processing...\n" );
+    // In reading in state
+    printf( "Reading in...\n" );
 
     // Read input from DataInStream
     for(int y = 0; y < IMHT; y++ ) {
@@ -225,10 +224,12 @@ void distributor(chanend c_in, chanend c_out, chanend tilt, chanend time, in por
     tilt <: 1;
     // Start timing
     time <: 1;
+    // In processing state
+    printf( "Processing...\n" );
 
     // game runs infinitely
     while (1) {
-        // while not paused, keep workers working and check for pauses
+        // while not paused, keep processing cells and check for pauses
         while (!tilted && !output) {
             select {
                 case tilt :> int x:
@@ -329,7 +330,7 @@ void distributor(chanend c_in, chanend c_out, chanend tilt, chanend time, in por
         else {
             // tell DataOutStream to open an output file
             //   this is necessary to prevent the previous file being corrupted
-            c_out <: (uchar) 1;
+            c_out <: 1;
             // Send processed data to DataOutStream
             for(int y = 0; y < IMHT; y++ ) {
                 for( int p = 0; p < NPKT; p++ ) { // for every packet
@@ -363,38 +364,33 @@ void DataOutStream(char outfname[], chanend c_in)
     printf( "DataOutStream: Start...\n" );
 
     while(1) {
-        select {
-            case c_in :> uchar x: // if distributer has a game state for outputting
-                res = _openoutpgm( outfname, IMWD, IMHT );
-                if( res ) {
-                    printf( "DataOutStream: Error opening %s\n.", outfname );
-                    return;
-                }
-                //Compile each line of the image and write the image line-by-line
-                for( int y = 0; y < IMHT; y++ ) {
-                    for( int p = 0; p < NPKT; p++ ) {
-                        uchar packet;
-                        c_in :> packet;
+        c_in :> int x; // if distributer has a game state for outputting
 
-                        // unpack each bit and add to output line
-                        for ( int x = 0; x < 8; x++ ) {
-                            int bit = unpack(x, packet);
-                            if (bit) line[p*8 + x] = 0xFF;
-                            else line[p*8 + x] = 0x00;
-                            //printf( "-%4.1d", line[p*8 + x]); //show image values
-                      }
-                }
-                //printf( "\n" );
-                _writeoutline( line, IMWD );
-                //printf( "DataOutStream: Line %d written...\n", y);
-                }
-
-                //Close the PGM image
-                _closeoutpgm();
-
-                printf( "DataOutStream: Complete\n");
-                break;
+        res = _openoutpgm( outfname, IMWD, IMHT );
+        if( res ) {
+            printf( "DataOutStream: Error opening %s\n.", outfname );
+            return;
         }
+        //Compile each line of the image and write the image line-by-line
+        for( int y = 0; y < IMHT; y++ ) {
+            for( int p = 0; p < NPKT; p++ ) {
+                uchar packet;
+                c_in :> packet;
+
+                // unpack each bit and add to output line
+                for ( int x = 0; x < 8; x++ ) {
+                    int bit = unpack(x, packet);
+                    if (bit) line[p*8 + x] = 0xFF;
+                    else line[p*8 + x] = 0x00;
+              }
+            }
+            _writeoutline( line, IMWD );
+        }
+
+        //Close the PGM image
+        _closeoutpgm();
+
+        printf( "DataOutStream: Complete\n");
     }
 
     return;
@@ -517,8 +513,8 @@ int main(void) {
     par {
         on tile[0]: i2c_master(i2c, 1, p_scl, p_sda, 10);                                  //server thread providing orientation data
         on tile[0]: orientation(i2c[0], tilt);                             //client thread reading orientation data
-        on tile[0]: DataInStream("512x512.pgm", inIO);                                     //thread to read in a PGM image
-        on tile[0]: DataOutStream("512x512out.pgm", outIO);                                //thread to write out a PGM image
+        on tile[0]: DataInStream("64x64.pgm", inIO);                                     //thread to read in a PGM image
+        on tile[0]: DataOutStream("64x64out.pgm", outIO);                                //thread to write out a PGM image
         on tile[0]: distributor(inIO, outIO, tilt, time, buttons, leds); // farmer
         on tile[0]: checkTime(time);
     }

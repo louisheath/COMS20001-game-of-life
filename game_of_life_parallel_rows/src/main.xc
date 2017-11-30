@@ -9,12 +9,12 @@
 #include "i2c.h"
 #include <assert.h>
 
-#define  IMHT 1024                  //image height
-#define  IMWD 1024                  //image width
+#define  IMHT 1208                //image height
+#define  IMWD 1208                //image width
 #define  NWKS 4                   //number of workers
 #define  NPKT IMWD/8              //number of packets in a row
 
-#define  printAt 100
+#define  printAt 2
 
 typedef unsigned char uchar;      //using uchar as shorthand
 
@@ -135,12 +135,10 @@ void DataInStream(char infname[], chanend c_out)
         for ( int p = 0; p < NPKT; p++) {         // for every packet we can fit in the row
             for ( int x = 0; x < 8; x++) {          // for each of the eight bits to be packed
                 packet = pack(x, packet, line[x + p*8]);
-                //printf( "-%4.1d ", line[p*8 + x] ); //show image values
             }
             c_out <: packet;
             packet = 0x00;
         }
-        if ((y % 100) == 0) printf( "DataInStream: Line %d read...\n", y);
     }
 
     //Close PGM image file
@@ -229,7 +227,8 @@ void distributor(chanend c_in, chanend c_out, chanend tilt, chanend worker[NWKS]
 
     // indicate start with green LED
     LEDs <: 4;
-    printf( "Processing...\n" );
+    // In reading in state
+    printf( "Reading in...\n" );
 
     // Read input from DataInStream
     for(int y = 0; y < IMHT; y++ ) {
@@ -253,7 +252,8 @@ void distributor(chanend c_in, chanend c_out, chanend tilt, chanend worker[NWKS]
     tilt <: 1;
     // Start timing
     time <: 1;
-
+    // In processing state
+    printf( "Processing...\n" );
     // game runs infinitely
     while (1) {
         // while not paused, keep workers working and check for pauses
@@ -277,7 +277,7 @@ void distributor(chanend c_in, chanend c_out, chanend tilt, chanend worker[NWKS]
                         worker[w] <: 0; // zero indicates work
                     }
                     i++;
-                    if (i == outputAt) {
+                    if (i == printAt) {
                         output = 1;
                         break;
                     }
@@ -527,12 +527,9 @@ void DataOutStream(char outfname[], chanend c_in)
                     int bit = unpack(x, packet);
                     if (bit) line[p*8 + x] = 0xFF;
                     else line[p*8 + x] = 0x00;
-                    //printf( "-%4.1d", line[p*8 + x]); //show image values
               }
-        }
-        //printf( "\n" );
-        _writeoutline( line, IMWD );
-        if ((y % 100) == 0) printf( "DataOutStream: Line %d written...\n", y);
+            }
+            _writeoutline( line, IMWD );
         }
 
         //Close the PGM image
@@ -658,10 +655,10 @@ int main(void) {
     par {
         on tile[0] : i2c_master(i2c, 1, p_scl, p_sda, 10);                                  //server thread providing orientation data
         on tile[0] : orientation(i2c[0], tilt);                             //client thread reading orientation data
-        on tile[0] : DataInStream("1024x1024.pgm", inIO);                                     //thread to read in a PGM image
-        on tile[0] : DataOutStream("1024x1024out.pgm", outIO);                                //thread to write out a PGM image
+        on tile[1] : DataInStream("1208x1208.pgm", inIO);                                     //thread to read in a PGM image
+        on tile[1] : DataOutStream("1208x1208out.pgm", outIO);                                //thread to write out a PGM image
         on tile[0] : distributor(inIO, outIO, tilt, WtoD, time, buttons, leds); // farmer
-        on tile[0] : checkTime(time);
+        on tile[1] : checkTime(time);
         // initialise workers
         par (int i = 0; i < (NWKS) ; i++){
             on tile[1] : worker((i+1) % NWKS, WtoD[(i+1) % NWKS], WtoW[i], WtoW[(i+1) % NWKS]);
